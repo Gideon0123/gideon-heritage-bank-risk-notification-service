@@ -65,6 +65,14 @@ public class NotificationOutbox {
     private UUID messageId;
 
     @Column(
+            name = "delivery_id",
+            nullable = false,
+            insertable = false,
+            updatable = false
+    )
+    private UUID deliveryId;
+
+    @Column(
             name = "event_type",
             nullable = false,
             length = 100
@@ -200,6 +208,7 @@ public class NotificationOutbox {
 
         outbox.delivery = delivery;
         outbox.messageId = UUID.randomUUID();
+        outbox.deliveryId = UUID.randomUUID();
         outbox.eventType = eventType;
         outbox.exchangeName = exchangeName;
         outbox.routingKey = routingKey;
