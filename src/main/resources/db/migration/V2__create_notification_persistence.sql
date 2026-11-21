@@ -577,11 +577,14 @@ CREATE INDEX idx_notification_delivery_created
     );
 
 
+COMMENT ON TABLE notification_deliveries IS
+    'Per-channel delivery records, provider responses, attempt tracking and delivery lifecycle.';
+
 COMMENT ON COLUMN notification_deliveries.encrypted_destination IS
-    'AES-256-GCM encrypted destination snapshot.';
+        'AES-256-GCM encrypted destination snapshot.';
 
 COMMENT ON COLUMN notification_deliveries.encrypted_content IS
-    'AES-256-GCM encrypted rendered delivery content.';
+        'AES-256-GCM encrypted rendered delivery content.';
 
 COMMENT ON COLUMN notification_deliveries.provider_message_id IS
     'Message identifier returned by the external delivery provider.';
@@ -592,105 +595,106 @@ COMMENT ON COLUMN notification_deliveries.idempotency_key IS
 COMMENT ON COLUMN notification_deliveries.attempt_count IS
     'Number of delivery attempts started for this record.';
 
-    -- ============================================================
-    -- 5. DEFAULT IDENTITY EMAIL TEMPLATES
-    -- ============================================================
 
-    INSERT INTO notification_templates (
-        id,
-        template_key,
-        channel,
-        locale,
-        version,
-        active,
-        subject_template,
-        title_template,
-        body_template,
-        content_format,
-        description
-    )
-    VALUES
+-- ============================================================
+-- 5. DEFAULT IDENTITY EMAIL TEMPLATES
+-- ============================================================
 
-    (
-        gen_random_uuid(),
-        'identity.email-verification',
-        'EMAIL',
-        'en-NG',
-        1,
-        TRUE,
-        'Verify your Gideon Heritage Bank email address',
-        'Verify your email address',
-        '<html><body><h2>Hello {{firstName}},</h2><p>Thank you for registering with Gideon Heritage Bank.</p><p>Please verify your email address using the link below.</p><p><a href="{{verificationUrl}}">Verify email address</a></p><p>This link expires at {{expiresAt}}.</p><p>If you did not create this account, please contact the bank.</p></body></html>',
-        'HTML',
-        'Customer email verification message.'
-    ),
+INSERT INTO notification_templates (
+    id,
+    template_key,
+    channel,
+    locale,
+    version,
+    active,
+    subject_template,
+    title_template,
+    body_template,
+    content_format,
+    description
+)
+VALUES
 
-    (
-        gen_random_uuid(),
-        'identity.password-reset',
-        'EMAIL',
-        'en-NG',
-        1,
-        TRUE,
-        'Reset your Gideon Heritage Bank password',
-        'Password reset requested',
-        '<html><body><h2>Hello {{firstName}},</h2><p>We received a request to reset your banking password.</p><p><a href="{{resetUrl}}">Reset your password</a></p><p>This link expires at {{expiresAt}}.</p><p>If you did not request this reset, please ignore this message and secure your account.</p></body></html>',
-        'HTML',
-        'Password reset email.'
-    ),
+(
+    gen_random_uuid(),
+    'identity.email-verification',
+    'EMAIL',
+    'en-NG',
+    1,
+    TRUE,
+    'Verify your Gideon Heritage Bank email address',
+    'Verify your email address',
+    '<html><body><h2>Hello {{firstName}},</h2><p>Thank you for registering with Gideon Heritage Bank.</p><p>Please verify your email address using the link below.</p><p><a href="{{verificationUrl}}">Verify email address</a></p><p>This link expires at {{expiresAt}}.</p><p>If you did not create this account, please contact the bank.</p></body></html>',
+    'HTML',
+    'Customer email verification message.'
+),
 
-    (
-        gen_random_uuid(),
-        'identity.staff-onboarding',
-        'EMAIL',
-        'en-NG',
-        1,
-        TRUE,
-        'Welcome to Gideon Heritage Bank',
-        'Staff onboarding',
-        '<html><body><h2>Welcome {{firstName}},</h2><p>Your staff identity has been created.</p><p>Please complete your onboarding using the link below.</p><p><a href="{{onboardingUrl}}">Complete onboarding</a></p><p>This link expires at {{expiresAt}}.</p></body></html>',
-        'HTML',
-        'Staff onboarding email.'
-    ),
+(
+    gen_random_uuid(),
+    'identity.password-reset',
+    'EMAIL',
+    'en-NG',
+    1,
+    TRUE,
+    'Reset your Gideon Heritage Bank password',
+    'Password reset requested',
+    '<html><body><h2>Hello {{firstName}},</h2><p>We received a request to reset your banking password.</p><p><a href="{{resetUrl}}">Reset your password</a></p><p>This link expires at {{expiresAt}}.</p><p>If you did not request this reset, please ignore this message and secure your account.</p></body></html>',
+    'HTML',
+    'Password reset email.'
+),
 
-    (
-        gen_random_uuid(),
-        'identity.customer-converted-to-staff',
-        'EMAIL',
-        'en-NG',
-        1,
-        TRUE,
-        'Your Gideon Heritage Bank staff status has been updated',
-        'Staff status updated',
-        '<html><body><h2>Hello {{firstName}},</h2><p>Your customer identity has been converted to a staff identity.</p><p>Your employee number is {{employeeNumber}}.</p><p>Your assigned staff role is {{staffRole}}.</p></body></html>',
-        'HTML',
-        'Notification that a customer identity was converted to staff.'
-    ),
+(
+    gen_random_uuid(),
+    'identity.staff-onboarding',
+    'EMAIL',
+    'en-NG',
+    1,
+    TRUE,
+    'Welcome to Gideon Heritage Bank',
+    'Staff onboarding',
+    '<html><body><h2>Welcome {{firstName}},</h2><p>Your staff identity has been created.</p><p>Please complete your onboarding using the link below.</p><p><a href="{{onboardingUrl}}">Complete onboarding</a></p><p>This link expires at {{expiresAt}}.</p></body></html>',
+    'HTML',
+    'Staff onboarding email.'
+),
 
-    (
-        gen_random_uuid(),
-        'identity.email-change-verification',
-        'EMAIL',
-        'en-NG',
-        1,
-        TRUE,
-        'Verify your new Gideon Heritage Bank email address',
-        'Confirm your new email address',
-        '<html><body><h2>Hello {{firstName}},</h2><p>We received a request to change your registered email address.</p><p><a href="{{verificationUrl}}">Confirm your new email address</a></p><p>This link expires at {{expiresAt}}.</p><p>If you did not request this change, contact the bank immediately.</p></body></html>',
-        'HTML',
-        'Verification email for a requested email address change.'
-    ),
+(
+    gen_random_uuid(),
+    'identity.customer-converted-to-staff',
+    'EMAIL',
+    'en-NG',
+    1,
+    TRUE,
+    'Your Gideon Heritage Bank staff status has been updated',
+    'Staff status updated',
+    '<html><body><h2>Hello {{firstName}},</h2><p>Your customer identity has been converted to a staff identity.</p><p>Your employee number is {{employeeNumber}}.</p><p>Your assigned staff role is {{staffRole}}.</p></body></html>',
+    'HTML',
+    'Notification that a customer identity was converted to staff.'
+),
 
-    (
-        gen_random_uuid(),
-        'identity.email-changed',
-        'EMAIL',
-        'en-NG',
-        1,
-        TRUE,
-        'Your Gideon Heritage Bank email address has changed',
-        'Email address changed',
-        '<html><body><h2>Hello {{firstName}},</h2><p>Your registered email address has been changed successfully.</p><p>If you did not make this change, contact the bank immediately.</p></body></html>',
-        'HTML',
-        'Confirmation email after a successful email address change.'
-    );
+(
+    gen_random_uuid(),
+    'identity.email-change-verification',
+    'EMAIL',
+    'en-NG',
+    1,
+    TRUE,
+    'Verify your new Gideon Heritage Bank email address',
+    'Confirm your new email address',
+    '<html><body><h2>Hello {{firstName}},</h2><p>We received a request to change your registered email address.</p><p><a href="{{verificationUrl}}">Confirm your new email address</a></p><p>This link expires at {{expiresAt}}.</p><p>If you did not request this change, contact the bank immediately.</p></body></html>',
+    'HTML',
+    'Verification email for a requested email address change.'
+),
+
+(
+    gen_random_uuid(),
+    'identity.email-changed',
+    'EMAIL',
+    'en-NG',
+    1,
+    TRUE,
+    'Your Gideon Heritage Bank email address has changed',
+    'Email address changed',
+    '<html><body><h2>Hello {{firstName}},</h2><p>Your registered email address has been changed successfully.</p><p>If you did not make this change, contact the bank immediately.</p></body></html>',
+    'HTML',
+    'Confirmation email after a successful email address change.'
+);

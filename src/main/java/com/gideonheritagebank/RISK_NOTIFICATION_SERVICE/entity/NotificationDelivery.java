@@ -55,18 +55,14 @@ public class NotificationDelivery {
     @JoinColumn(
             name = "notification_id",
             nullable = false,
-            foreignKey = @ForeignKey(
-                    name = "fk_notification_delivery_notification"
-            )
+            foreignKey = @ForeignKey(name = "fk_notification_delivery_notification")
     )
     private Notification notification;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(
             name = "template_id",
-            foreignKey = @ForeignKey(
-                    name = "fk_notification_delivery_template"
-            )
+            foreignKey = @ForeignKey(name = "fk_notification_delivery_template")
     )
     private NotificationTemplate template;
 
@@ -84,16 +80,13 @@ public class NotificationDelivery {
             nullable = false,
             length = 30
     )
-    private NotificationDeliveryStatus status =
-            NotificationDeliveryStatus.PENDING;
+    private NotificationDeliveryStatus status = NotificationDeliveryStatus.PENDING;
 
     /*
      * AES-GCM encrypted destination.
-     *
      * For EMAIL, this contains an encrypted email address.
      * For SMS, this contains an encrypted phone number.
      * For PUSH, this contains an encrypted destination token.
-     *
      * IN_APP normally does not need a destination because
      * the parent Notification already contains userId.
      */
@@ -111,7 +104,6 @@ public class NotificationDelivery {
 
     /*
      * AES-GCM encrypted rendered content.
-     *
      * This may contain password-reset URLs, verification
      * links or other sensitive notification content.
      */
@@ -128,8 +120,7 @@ public class NotificationDelivery {
             nullable = false,
             length = 20
     )
-    private NotificationContentFormat contentFormat =
-            NotificationContentFormat.PLAIN_TEXT;
+    private NotificationContentFormat contentFormat = NotificationContentFormat.PLAIN_TEXT;
 
     @Column(name = "provider", length = 80)
     private String provider;
@@ -202,9 +193,7 @@ public class NotificationDelivery {
     private long version;
 
 
-    // =====================================================
     // FACTORY
-    // =====================================================
 
     /*
      * The caller must encrypt destination and content
@@ -223,27 +212,19 @@ public class NotificationDelivery {
     ) {
 
         if (channel == null) {
-            throw new IllegalArgumentException(
-                    "Delivery channel is required."
-            );
+            throw new IllegalArgumentException("Delivery channel is required.");
         }
 
         if (encryptedContent == null || encryptedContent.isBlank()) {
-            throw new IllegalArgumentException(
-                    "Encrypted delivery content is required."
-            );
+            throw new IllegalArgumentException("Encrypted delivery content is required.");
         }
 
         if (contentFormat == null) {
-            throw new IllegalArgumentException(
-                    "Delivery content format is required."
-            );
+            throw new IllegalArgumentException("Delivery content format is required.");
         }
 
         if (maxAttempts < 1) {
-            throw new IllegalArgumentException(
-                    "Maximum attempts must be at least 1."
-            );
+            throw new IllegalArgumentException("Maximum attempts must be at least 1.");
         }
 
         if (channel != NotificationChannel.IN_APP
@@ -259,9 +240,7 @@ public class NotificationDelivery {
                 && (idempotencyKey.isBlank()
                 || idempotencyKey.length() > 255)) {
 
-            throw new IllegalArgumentException(
-                    "Delivery idempotency key is invalid."
-            );
+            throw new IllegalArgumentException("Delivery idempotency key is invalid.");
         }
 
         if (template != null && template.getChannel() != channel) {
@@ -286,16 +265,11 @@ public class NotificationDelivery {
     }
 
 
-    // =====================================================
     // RELATIONSHIP MANAGEMENT
-    // =====================================================
-
     void assignNotification(Notification notification) {
 
         if (notification == null) {
-            throw new IllegalArgumentException(
-                    "Notification is required."
-            );
+            throw new IllegalArgumentException("Notification is required.");
         }
 
         this.notification = notification;
@@ -331,7 +305,6 @@ public class NotificationDelivery {
             String provider,
             String providerMessageId
     ) {
-
         requireStatus(NotificationDeliveryStatus.PROCESSING);
 
         this.status = NotificationDeliveryStatus.SENT;
@@ -370,12 +343,9 @@ public class NotificationDelivery {
             return;
         }
 
-        if (nextAttemptAt == null
-                || !nextAttemptAt.isAfter(Instant.now())) {
+        if (nextAttemptAt == null || !nextAttemptAt.isAfter(Instant.now())) {
 
-            throw new IllegalArgumentException(
-                    "Next attempt time must be in the future."
-            );
+            throw new IllegalArgumentException("Next attempt time must be in the future.");
         }
 
         this.status = NotificationDeliveryStatus.RETRY_SCHEDULED;
@@ -417,9 +387,7 @@ public class NotificationDelivery {
     public void cancel(String reason) {
 
         if (status == NotificationDeliveryStatus.DELIVERED) {
-            throw new IllegalStateException(
-                    "A delivered notification cannot be cancelled."
-            );
+            throw new IllegalStateException("A delivered notification cannot be cancelled.");
         }
 
         this.status = NotificationDeliveryStatus.CANCELLED;
@@ -427,11 +395,7 @@ public class NotificationDelivery {
         this.lastError = reason;
     }
 
-
-    // =====================================================
     // HELPERS
-    // =====================================================
-
     public boolean isTerminal() {
 
         return status == NotificationDeliveryStatus.DELIVERED
