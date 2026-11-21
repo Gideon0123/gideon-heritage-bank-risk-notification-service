@@ -21,10 +21,7 @@ import java.util.UUID;
         uniqueConstraints = {
                 @UniqueConstraint(
                         name = "uq_notification_delivery_channel",
-                        columnNames = {
-                                "notification_id",
-                                "channel"
-                        }
+                        columnNames = {"notification_id", "channel"}
                 ),
                 @UniqueConstraint(
                         name = "uq_notification_delivery_idempotency",
@@ -64,10 +61,6 @@ public class NotificationDelivery {
     )
     private Notification notification;
 
-    /*
-     * The exact template version used to render this delivery.
-     * It can be null for manually composed notifications.
-     */
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(
             name = "template_id",
@@ -95,21 +88,20 @@ public class NotificationDelivery {
             NotificationDeliveryStatus.PENDING;
 
     /*
-     * Destination snapshot.
+     * AES-GCM encrypted destination.
      *
-     * EMAIL: recipient email address.
-     * SMS: recipient phone number.
-     * PUSH: destination token or provider-specific identifier.
-     * IN_APP: normally null because userId is on Notification.
+     * For EMAIL, this contains an encrypted email address.
+     * For SMS, this contains an encrypted phone number.
+     * For PUSH, this contains an encrypted destination token.
      *
-     * This is a snapshot so a later profile change does not
-     * silently change the destination of an already-created delivery.
+     * IN_APP normally does not need a destination because
+     * the parent Notification already contains userId.
      */
     @Column(
-            name = "destination",
-            length = 500
+            name = "encrypted_destination",
+            columnDefinition = "TEXT"
     )
-    private String destination;
+    private String encryptedDestination;
 
     @Column(
             name = "subject",
@@ -117,12 +109,18 @@ public class NotificationDelivery {
     )
     private String subject;
 
+    /*
+     * AES-GCM encrypted rendered content.
+     *
+     * This may contain password-reset URLs, verification
+     * links or other sensitive notification content.
+     */
     @Column(
-            name = "content",
+            name = "encrypted_content",
             nullable = false,
             columnDefinition = "TEXT"
     )
-    private String content;
+    private String encryptedContent;
 
     @Enumerated(EnumType.STRING)
     @Column(
@@ -133,19 +131,7 @@ public class NotificationDelivery {
     private NotificationContentFormat contentFormat =
             NotificationContentFormat.PLAIN_TEXT;
 
-    /*
-     * Provider information.
-     *
-     * Examples:
-     * SMTP
-     * SENDGRID
-     * AWS_SES
-     * INTERNAL_WEBSOCKET
-     */
-    @Column(
-            name = "provider",
-            length = 80
-    )
+    @Column(name = "provider", length = 80)
     private String provider;
 
     @Column(
@@ -154,18 +140,12 @@ public class NotificationDelivery {
     )
     private String providerMessageId;
 
-    /*
-     * Unique key used to prevent duplicate delivery creation.
-     */
     @Column(
             name = "idempotency_key",
             length = 255
     )
     private String idempotencyKey;
 
-    /*
-     * Retry information.
-     */
     @Column(
             name = "attempt_count",
             nullable = false
@@ -226,12 +206,17 @@ public class NotificationDelivery {
     // FACTORY
     // =====================================================
 
+    /*
+     * The caller must encrypt destination and content
+     * using InboxPayloadEncryptionService before calling
+     * this factory.
+     */
     public static NotificationDelivery create(
             NotificationChannel channel,
             NotificationTemplate template,
-            String destination,
+            String encryptedDestination,
             String subject,
-            String content,
+            String encryptedContent,
             NotificationContentFormat contentFormat,
             String idempotencyKey,
             int maxAttempts
@@ -243,9 +228,9 @@ public class NotificationDelivery {
             );
         }
 
-        if (content == null || content.isBlank()) {
+        if (encryptedContent == null || encryptedContent.isBlank()) {
             throw new IllegalArgumentException(
-                    "Delivery content is required."
+                    "Encrypted delivery content is required."
             );
         }
 
@@ -262,27 +247,17 @@ public class NotificationDelivery {
         }
 
         if (channel != NotificationChannel.IN_APP
-                && (destination == null || destination.isBlank())) {
+                && (encryptedDestination == null
+                || encryptedDestination.isBlank())) {
 
             throw new IllegalArgumentException(
-                    "Delivery destination is required for this channel."
-            );
-        }
-
-        if (destination != null && destination.length() > 500) {
-            throw new IllegalArgumentException(
-                    "Delivery destination cannot exceed 500 characters."
-            );
-        }
-
-        if (subject != null && subject.length() > 500) {
-            throw new IllegalArgumentException(
-                    "Delivery subject cannot exceed 500 characters."
+                    "Encrypted destination is required for this channel."
             );
         }
 
         if (idempotencyKey != null
-                && (idempotencyKey.isBlank() || idempotencyKey.length() > 255)) {
+                && (idempotencyKey.isBlank()
+                || idempotencyKey.length() > 255)) {
 
             throw new IllegalArgumentException(
                     "Delivery idempotency key is invalid."
@@ -299,9 +274,9 @@ public class NotificationDelivery {
 
         delivery.channel = channel;
         delivery.template = template;
-        delivery.destination = destination;
+        delivery.encryptedDestination = encryptedDestination;
         delivery.subject = subject;
-        delivery.content = content;
+        delivery.encryptedContent = encryptedContent;
         delivery.contentFormat = contentFormat;
         delivery.idempotencyKey = idempotencyKey;
         delivery.maxAttempts = maxAttempts;
@@ -396,7 +371,7 @@ public class NotificationDelivery {
         }
 
         if (nextAttemptAt == null
-                || nextAttemptAt.isBefore(Instant.now())) {
+                || !nextAttemptAt.isAfter(Instant.now())) {
 
             throw new IllegalArgumentException(
                     "Next attempt time must be in the future."
