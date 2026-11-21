@@ -2,6 +2,7 @@ package com.gideonheritagebank.RISK_NOTIFICATION_SERVICE.entity;
 
 import com.gideonheritagebank.RISK_NOTIFICATION_SERVICE.enums.NotificationCategory;
 import com.gideonheritagebank.RISK_NOTIFICATION_SERVICE.enums.NotificationType;
+import com.gideonheritagebank.RISK_NOTIFICATION_SERVICE.exception.BadRequest;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -57,7 +58,6 @@ public class Notification {
 
     /*
      * This is the UUID of the user from Identity Service.
-     *
      * We intentionally do not create a JPA relationship
      * to BankUser because Identity Service owns that entity
      * and its database.
@@ -86,7 +86,6 @@ public class Notification {
 
     /*
      * Original event information.
-     *
      * These fields allow us to trace a notification
      * back to the event that generated it.
      */
@@ -104,7 +103,6 @@ public class Notification {
 
     /*
      * Direct reference to the durable inbox event.
-     *
      * This is only an identifier, not a JPA relationship.
      */
     @Column(name = "source_inbox_event_id")
@@ -159,9 +157,7 @@ public class Notification {
     @Column(name = "expires_at")
     private Instant expiresAt;
 
-    /*
-     * Null means the user has not read the notification.
-     */
+    /* Null means the user has not read the notification. */
     @Column(name = "read_at")
     private Instant readAt;
 
@@ -195,10 +191,7 @@ public class Notification {
     private List<NotificationDelivery> deliveries = new ArrayList<>();
 
 
-    // =====================================================
     // FACTORY METHOD
-    // =====================================================
-
     public static Notification create(
             UUID userId,
             NotificationType notificationType,
@@ -214,69 +207,49 @@ public class Notification {
     ) {
 
         if (userId == null) {
-            throw new IllegalArgumentException(
-                    "Notification user ID is required."
-            );
+            throw new BadRequest("Notification user ID is required.");
         }
 
         if (notificationType == null) {
-            throw new IllegalArgumentException(
-                    "Notification type is required."
-            );
+            throw new BadRequest("Notification type is required.");
         }
 
         if (category == null) {
-            throw new IllegalArgumentException(
-                    "Notification category is required."
-            );
+            throw new BadRequest("Notification category is required.");
         }
 
         if (title == null || title.isBlank()) {
-            throw new IllegalArgumentException(
-                    "Notification title is required."
-            );
+            throw new BadRequest("Notification title is required.");
         }
 
         if (body == null || body.isBlank()) {
-            throw new IllegalArgumentException(
-                    "Notification body is required."
-            );
+            throw new BadRequest("Notification body is required.");
         }
 
         if (title.length() > 255) {
-            throw new IllegalArgumentException(
-                    "Notification title cannot exceed 255 characters."
-            );
+            throw new BadRequest("Notification title cannot exceed 255 characters.");
         }
 
         if (actionUrl != null && actionUrl.length() > 1000) {
-            throw new IllegalArgumentException(
-                    "Notification action URL cannot exceed 1000 characters."
-            );
+            throw new BadRequest("Notification action URL cannot exceed 1000 characters.");
         }
 
         if ((sourceEventType == null) != (sourceMessageId == null)) {
-            throw new IllegalArgumentException(
+            throw new BadRequest(
                     "Source event type and source message ID must either both be provided or both be null."
             );
         }
 
         if (sourceEventType != null && sourceEventType.isBlank()) {
-            throw new IllegalArgumentException(
-                    "Source event type cannot be blank."
-            );
+            throw new BadRequest("Source event type cannot be blank.");
         }
 
         if (sourceMessageId != null && sourceMessageId.isBlank()) {
-            throw new IllegalArgumentException(
-                    "Source message ID cannot be blank."
-            );
+            throw new BadRequest("Source message ID cannot be blank.");
         }
 
         if (expiresAt != null && expiresAt.isBefore(Instant.now())) {
-            throw new IllegalArgumentException(
-                    "Notification expiry cannot be in the past."
-            );
+            throw new BadRequest("Notification expiry cannot be in the past.");
         }
 
         Notification notification = new Notification();
@@ -296,17 +269,11 @@ public class Notification {
         return notification;
     }
 
-
-    // =====================================================
     // DELIVERY MANAGEMENT
-    // =====================================================
-
     public void addDelivery(NotificationDelivery delivery) {
 
         if (delivery == null) {
-            throw new IllegalArgumentException(
-                    "Notification delivery is required."
-            );
+            throw new IllegalArgumentException("Notification delivery is required.");
         }
 
         if (deliveries.stream().anyMatch(
@@ -321,11 +288,7 @@ public class Notification {
         delivery.assignNotification(this);
     }
 
-
-    // =====================================================
     // NOTIFICATION STATE MANAGEMENT
-    // =====================================================
-
     public void markAsRead() {
 
         if (readAt == null) {
@@ -341,7 +304,6 @@ public class Notification {
     }
 
     public void restore() {
-
         archivedAt = null;
     }
 
@@ -355,7 +317,6 @@ public class Notification {
 
     public boolean isExpired() {
 
-        return expiresAt != null
-                && expiresAt.isBefore(Instant.now());
+        return expiresAt != null && expiresAt.isBefore(Instant.now());
     }
 }

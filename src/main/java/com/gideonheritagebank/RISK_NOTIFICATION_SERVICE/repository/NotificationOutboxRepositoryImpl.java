@@ -30,9 +30,7 @@ public class NotificationOutboxRepositoryImpl implements NotificationOutboxRepos
     ) {
 
         if (workerId == null || workerId.isBlank()) {
-            throw new IllegalArgumentException(
-                    "Worker ID is required."
-            );
+            throw new IllegalArgumentException("Worker ID is required.");
         }
 
         if (now == null || leaseExpiry == null

@@ -144,6 +144,19 @@ public class GlobalExceptionHandler {
         );
     }
 
+    @ExceptionHandler(NotificationOutboxPublishException.class)
+    public ResponseEntity<ApiResponse<Void>> handleNotificationOutboxPublish(
+            NotificationOutboxPublishException exception,
+            HttpServletRequest request
+    ) {
+        return errorResponse(
+                HttpStatus.BAD_REQUEST,
+                exception.getMessage(),
+                Map.of(),
+                request
+        );
+    }
+
 
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<ApiResponse<Void>> handleUnreadableMessage(

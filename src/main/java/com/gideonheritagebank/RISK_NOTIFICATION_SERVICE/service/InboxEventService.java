@@ -14,7 +14,6 @@ import java.util.UUID;
 public class InboxEventService {
 
     private final InboxEventRepository inboxEventRepository;
-
     private final InboxPayloadEncryptionService encryptionService;
 
     /**
