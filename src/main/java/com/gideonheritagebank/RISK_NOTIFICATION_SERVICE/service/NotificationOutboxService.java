@@ -9,7 +9,6 @@ import com.gideonheritagebank.RISK_NOTIFICATION_SERVICE.entity.NotificationDeliv
 import com.gideonheritagebank.RISK_NOTIFICATION_SERVICE.entity.NotificationOutbox;
 import com.gideonheritagebank.RISK_NOTIFICATION_SERVICE.repository.NotificationOutboxRepository;
 import com.gideonheritagebank.RISK_NOTIFICATION_SERVICE.repository.NotificationRepository;
-import com.gideonheritagebank.RISK_NOTIFICATION_SERVICE.repository.NotificationDeliveryRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -26,7 +25,6 @@ public class NotificationOutboxService {
 
     private static final String DELIVERY_EVENT_TYPE = "NOTIFICATION_DELIVERY_REQUESTED";
     private final NotificationRepository notificationRepository;
-    private final NotificationDeliveryRepository deliveryRepository;
     private final NotificationOutboxRepository outboxRepository;
     private final NotificationOutboxProperties outboxProperties;
     private final ObjectMapper objectMapper;

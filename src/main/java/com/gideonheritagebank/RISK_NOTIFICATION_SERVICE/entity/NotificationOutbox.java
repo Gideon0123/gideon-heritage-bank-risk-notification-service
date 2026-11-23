@@ -208,7 +208,6 @@ public class NotificationOutbox {
 
         outbox.delivery = delivery;
         outbox.messageId = UUID.randomUUID();
-        outbox.deliveryId = UUID.randomUUID();
         outbox.eventType = eventType;
         outbox.exchangeName = exchangeName;
         outbox.routingKey = routingKey;
