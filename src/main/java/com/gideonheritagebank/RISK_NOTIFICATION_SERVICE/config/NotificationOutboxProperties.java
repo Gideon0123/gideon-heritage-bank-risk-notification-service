@@ -25,11 +25,6 @@ public class NotificationOutboxProperties {
     // Retry policy
     private long initialRetryDelaySeconds = 5;
     private long maximumRetryDelaySeconds = 900;
-
-    /*
-     * 0.20 means up to 20% random variation around
-     * the calculated exponential delay.
-     */
     private double retryJitterFactor = 0.20;
 
     // Recovery policy
@@ -75,6 +70,41 @@ public class NotificationOutboxProperties {
         if (retryJitterFactor < 0 || retryJitterFactor > 1) {
             throw new IllegalStateException(
                     "Retry jitter factor must be between 0 and 1."
+            );
+        }
+    }
+
+    public void validateWorkerConfiguration() {
+
+        validateRetryConfiguration();
+
+        if (batchSize < 1) {
+            throw new IllegalStateException(
+                    "Outbox batch size must be at least 1."
+            );
+        }
+
+        if (leaseDurationSeconds < 1) {
+            throw new IllegalStateException(
+                    "Outbox lease duration must be positive."
+            );
+        }
+
+        if (publisherConfirmTimeoutSeconds < 1) {
+            throw new IllegalStateException(
+                    "Publisher confirmation timeout must be positive."
+            );
+        }
+
+        if (recoveryBatchSize < 1) {
+            throw new IllegalStateException(
+                    "Recovery batch size must be positive."
+            );
+        }
+
+        if (recoveryFixedDelay < 1) {
+            throw new IllegalStateException(
+                    "Recovery fixed delay must be positive."
             );
         }
     }

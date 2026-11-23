@@ -6,8 +6,14 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @Getter
 @Setter
-@ConfigurationProperties(prefix = "notification.encryption")
+@ConfigurationProperties(prefix = "notification.inbox")
 public class NotificationEncryptionProperties {
 
-    private String key;
+    /*
+     * Bound from notification.inbox.encryption-key.
+     *
+     * This is the existing NOTIFICATION_INBOX_ENCRYPTION_KEY.
+     * We are deliberately not introducing another environment variable.
+     */
+    private String encryptionKey;
 }

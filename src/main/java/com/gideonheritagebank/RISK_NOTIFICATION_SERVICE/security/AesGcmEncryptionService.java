@@ -5,6 +5,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
 import javax.crypto.Cipher;
+import javax.crypto.Mac;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.ByteBuffer;
@@ -20,10 +21,17 @@ public class AesGcmEncryptionService {
 
     private static final String ALGORITHM = "AES";
     private static final String TRANSFORMATION = "AES/GCM/NoPadding";
+    private static final String KDF_ALGORITHM = "HmacSHA256";
+
     private static final int NONCE_LENGTH = 12;
     private static final int AUTH_TAG_LENGTH_BITS = 128;
     private static final int KEY_LENGTH_BYTES = 32;
+
     private static final byte FORMAT_VERSION = 1;
+
+    private static final byte[] KDF_SALT =
+            "GIDEON-HERITAGE-BANK-NOTIFICATION-KEY-V1"
+                    .getBytes(StandardCharsets.UTF_8);
 
     private final NotificationEncryptionProperties properties;
 
@@ -37,22 +45,21 @@ public class AesGcmEncryptionService {
             );
         }
 
-        if (purpose == null || purpose.isBlank()) {
-            throw new IllegalArgumentException(
-                    "Encryption purpose is required."
-            );
-        }
+        validatePurpose(purpose);
+
+        byte[] derivedKey = null;
 
         try {
-            byte[] key = getEncryptionKey();
-            byte[] nonce = new byte[NONCE_LENGTH];
 
+            derivedKey = deriveKey(purpose);
+
+            byte[] nonce = new byte[NONCE_LENGTH];
             secureRandom.nextBytes(nonce);
 
             Cipher cipher = Cipher.getInstance(TRANSFORMATION);
 
             SecretKeySpec secretKey =
-                    new SecretKeySpec(key, ALGORITHM);
+                    new SecretKeySpec(derivedKey, ALGORITHM);
 
             GCMParameterSpec parameterSpec =
                     new GCMParameterSpec(AUTH_TAG_LENGTH_BITS, nonce);
@@ -72,13 +79,13 @@ public class AesGcmEncryptionService {
             );
 
             /*
-             * Stored binary structure:
+             * Stored envelope:
              *
-             * 1 byte  - format version
-             * 12 bytes - nonce
-             * remaining bytes - ciphertext + authentication tag
+             * 1 byte: format version
+             * 12 bytes: random nonce
+             * Remaining bytes: ciphertext + GCM authentication tag
              *
-             * The entire structure is Base64 encoded.
+             * Entire envelope is Base64 encoded.
              */
 
             ByteBuffer buffer = ByteBuffer.allocate(
@@ -96,13 +103,22 @@ public class AesGcmEncryptionService {
         } catch (GeneralSecurityException exception) {
 
             throw new EncryptionOperationException(
-                    "Unable to encrypt sensitive notification data.",
+                    "Unable to encrypt notification content.",
                     exception
             );
+
+        } finally {
+
+            if (derivedKey != null) {
+                Arrays.fill(derivedKey, (byte) 0);
+            }
         }
     }
 
-    public String decrypt(String encryptedValue, String purpose) {
+    public String decrypt(
+            String encryptedValue,
+            String purpose
+    ) {
 
         if (encryptedValue == null || encryptedValue.isBlank()) {
             throw new IllegalArgumentException(
@@ -110,19 +126,18 @@ public class AesGcmEncryptionService {
             );
         }
 
-        if (purpose == null || purpose.isBlank()) {
-            throw new IllegalArgumentException(
-                    "Decryption purpose is required."
-            );
-        }
+        validatePurpose(purpose);
 
         byte[] storedData;
 
         try {
+
             storedData = Base64.getDecoder().decode(encryptedValue);
+
         } catch (IllegalArgumentException exception) {
+
             throw new EncryptionOperationException(
-                    "Encrypted data has an invalid encoding.",
+                    "Encrypted data has invalid Base64 encoding.",
                     exception
             );
         }
@@ -149,11 +164,16 @@ public class AesGcmEncryptionService {
         byte[] ciphertext = new byte[buffer.remaining()];
         buffer.get(ciphertext);
 
+        byte[] derivedKey = null;
+
         try {
+
+            derivedKey = deriveKey(purpose);
+
             Cipher cipher = Cipher.getInstance(TRANSFORMATION);
 
             SecretKeySpec secretKey =
-                    new SecretKeySpec(getEncryptionKey(), ALGORITHM);
+                    new SecretKeySpec(derivedKey, ALGORITHM);
 
             GCMParameterSpec parameterSpec =
                     new GCMParameterSpec(AUTH_TAG_LENGTH_BITS, nonce);
@@ -178,49 +198,121 @@ public class AesGcmEncryptionService {
         } catch (GeneralSecurityException exception) {
 
             /*
-             * This also catches authentication failures caused by
-             * tampering, a wrong key, or the wrong encryption purpose.
+             * Authentication failures include:
+             * - incorrect key
+             * - modified ciphertext
+             * - incorrect purpose
              */
 
             throw new EncryptionOperationException(
-                    "Unable to decrypt sensitive notification data. "
-                            + "The key may be incorrect or the data may "
-                            + "have been modified.",
+                    "Unable to decrypt notification content. "
+                            + "The key may be incorrect or the data "
+                            + "may have been modified.",
                     exception
             );
+
+        } finally {
+
+            if (derivedKey != null) {
+                Arrays.fill(derivedKey, (byte) 0);
+            }
         }
     }
 
-    private byte[] getEncryptionKey() {
+    /*
+     * HKDF-style HMAC-SHA256 derivation.
+     *
+     * The inbox service continues using the existing master key
+     * and its original encryption format.
+     *
+     * This component derives independent keys for:
+     * NOTIFICATION_DELIVERY_CONTENT
+     * NOTIFICATION_DELIVERY_DESTINATION
+     */
+    private byte[] deriveKey(String purpose)
+            throws GeneralSecurityException {
 
-        String encodedKey = properties.getKey();
+        String encodedMasterKey = properties.getEncryptionKey();
 
-        if (encodedKey == null || encodedKey.isBlank()) {
+        if (encodedMasterKey == null || encodedMasterKey.isBlank()) {
             throw new IllegalStateException(
-                    "Notification encryption key is not configured."
+                    "Notification inbox encryption key is not configured."
             );
         }
 
-        byte[] key;
+        byte[] masterKey;
 
         try {
-            key = Base64.getDecoder().decode(encodedKey);
+
+            masterKey = Base64.getDecoder().decode(encodedMasterKey);
+
         } catch (IllegalArgumentException exception) {
+
             throw new IllegalStateException(
-                    "Notification encryption key must be valid Base64.",
+                    "Notification inbox encryption key must be valid Base64.",
                     exception
             );
         }
 
-        if (key.length != KEY_LENGTH_BYTES) {
-            Arrays.fill(key, (byte) 0);
+        if (masterKey.length != KEY_LENGTH_BYTES) {
+
+            Arrays.fill(masterKey, (byte) 0);
 
             throw new IllegalStateException(
-                    "Notification encryption key must contain exactly "
+                    "Notification inbox encryption key must contain "
                             + KEY_LENGTH_BYTES + " bytes."
             );
         }
 
-        return key;
+        byte[] pseudoRandomKey = null;
+
+        try {
+
+            Mac extract = Mac.getInstance(KDF_ALGORITHM);
+
+            extract.init(
+                    new SecretKeySpec(KDF_SALT, KDF_ALGORITHM)
+            );
+
+            pseudoRandomKey = extract.doFinal(masterKey);
+
+            Mac expand = Mac.getInstance(KDF_ALGORITHM);
+
+            expand.init(
+                    new SecretKeySpec(
+                            pseudoRandomKey,
+                            KDF_ALGORITHM
+                    )
+            );
+
+            expand.update(
+                    ("GHB-NOTIFICATION:" + purpose)
+                            .getBytes(StandardCharsets.UTF_8)
+            );
+
+            expand.update((byte) 0x01);
+
+            return Arrays.copyOf(
+                    expand.doFinal(),
+                    KEY_LENGTH_BYTES
+            );
+
+        } finally {
+
+            Arrays.fill(masterKey, (byte) 0);
+
+            if (pseudoRandomKey != null) {
+                Arrays.fill(pseudoRandomKey, (byte) 0);
+            }
+        }
+    }
+
+    private void validatePurpose(String purpose) {
+
+        if (purpose == null || purpose.isBlank()) {
+            throw new IllegalArgumentException(
+                    "Encryption purpose is required."
+            );
+        }
     }
 }

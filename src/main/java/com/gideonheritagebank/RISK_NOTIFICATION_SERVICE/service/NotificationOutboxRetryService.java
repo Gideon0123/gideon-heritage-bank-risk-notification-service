@@ -9,26 +9,20 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.UUID;
+import java.util.concurrent.ThreadLocalRandom;
 
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class NotificationOutboxRetryService {
 
+    private static final int MAX_ERROR_LENGTH = 4000;
+
     private final NotificationOutboxRepository outboxRepository;
     private final NotificationOutboxProperties properties;
-    private final SecureRandom secureRandom = new SecureRandom();
 
-
-    /*
-     * Handles a known publishing failure.
-     *
-     * The worker must provide its ID so that an old worker
-     * cannot update a record that another worker has reclaimed.
-     */
     @Transactional
     public void handlePublishingFailure(
             UUID outboxId,
@@ -36,7 +30,8 @@ public class NotificationOutboxRetryService {
             Throwable failure
     ) {
 
-        NotificationOutbox outbox = outboxRepository.findByIdForUpdate(outboxId)
+        NotificationOutbox outbox = outboxRepository
+                .findByIdForUpdate(outboxId)
                 .orElseThrow(() -> new IllegalStateException(
                         "Notification outbox record not found: " + outboxId
                 ));
@@ -44,20 +39,23 @@ public class NotificationOutboxRetryService {
         verifyWorkerOwnership(outbox, workerId);
 
         if (outbox.getStatus() != NotificationOutboxStatus.PROCESSING) {
-
             throw new IllegalStateException(
-                    "Only processing outbox records can be retried."
+                    "Only PROCESSING outbox records can be retried."
             );
         }
 
-        String error = resolveError(failure);
+        String safeError = resolveSafeError(failure);
 
+        /*
+         * markProcessing() increments attemptCount when the record
+         * is claimed. Do not increment it here.
+         */
         if (!outbox.hasAttemptsRemaining()) {
 
-            outbox.markDeadLettered(error);
+            outbox.markDeadLettered(safeError);
 
             log.error(
-                    "Outbox record dead-lettered after exhausting publishing attempts. "
+                    "Outbox record dead-lettered after exhausting attempts. "
                             + "outboxId={}, attempts={}",
                     outboxId,
                     outbox.getAttemptCount()
@@ -66,31 +64,32 @@ public class NotificationOutboxRetryService {
             return;
         }
 
-        Instant nextAttemptAt = calculateNextAttemptAt(
-                outbox.getAttemptCount()
+        Instant retryAt = calculateNextAttemptAt(
+                outbox.getAttemptCount(),
+                Instant.now()
         );
 
         outbox.scheduleRetry(
-                nextAttemptAt,
-                error
+                retryAt,
+                safeError
         );
 
         log.warn(
-                "Outbox publishing failed. Retry scheduled. "
-                        + "outboxId={}, attempt={}, nextAttemptAt={}",
+                "Outbox retry scheduled. outboxId={}, attempt={}, nextAttemptAt={}",
                 outboxId,
                 outbox.getAttemptCount(),
-                nextAttemptAt
+                retryAt
         );
     }
 
-
-    /*
-     * Shared by normal retry handling and lease recovery.
-     *
-     * Attempt number is the attempt that just failed.
-     */
     public Instant calculateNextAttemptAt(int attemptNumber) {
+        return calculateNextAttemptAt(attemptNumber, Instant.now());
+    }
+
+    public Instant calculateNextAttemptAt(
+            int attemptNumber,
+            Instant now
+    ) {
 
         properties.validateRetryConfiguration();
 
@@ -100,69 +99,81 @@ public class NotificationOutboxRetryService {
             );
         }
 
+        if (now == null) {
+            throw new IllegalArgumentException(
+                    "Current time is required."
+            );
+        }
+
         long initialDelay = properties.getInitialRetryDelaySeconds();
         long maximumDelay = properties.getMaximumRetryDelaySeconds();
 
         /*
-         * Calculate:
+         * Exponential backoff:
          *
          * initialDelay * 2^(attemptNumber - 1)
          *
-         * We cap the exponent before calculating to avoid
-         * long overflow for unusually large attempt numbers.
+         * We calculate iteratively to avoid long overflow.
          */
-        int exponent = Math.min(attemptNumber - 1, 62);
+        long baseDelay = initialDelay;
 
-        long exponentialDelay;
+        for (int i = 1; i < attemptNumber; i++) {
 
-        try {
+            if (baseDelay >= maximumDelay) {
+                baseDelay = maximumDelay;
+                break;
+            }
 
-            exponentialDelay = Math.multiplyExact(
-                    initialDelay,
-                    1L << exponent
-            );
+            if (baseDelay > maximumDelay / 2) {
+                baseDelay = maximumDelay;
+                break;
+            }
 
-        } catch (ArithmeticException exception) {
-
-            exponentialDelay = maximumDelay;
+            baseDelay *= 2;
         }
 
-        long cappedDelay = Math.min(
-                exponentialDelay,
-                maximumDelay
-        );
+        baseDelay = Math.min(baseDelay, maximumDelay);
 
         double jitterFactor = properties.getRetryJitterFactor();
 
-        double variation = cappedDelay * jitterFactor;
+        if (jitterFactor == 0) {
+            return now.plusSeconds(baseDelay);
+        }
 
         double minimumDelay = Math.max(
                 1,
-                cappedDelay - variation
+                baseDelay * (1.0 - jitterFactor)
         );
 
         double maximumJitteredDelay = Math.min(
                 maximumDelay,
-                cappedDelay + variation
+                baseDelay * (1.0 + jitterFactor)
         );
 
-        double randomDelay = minimumDelay
-                + secureRandom.nextDouble()
-                * (maximumJitteredDelay - minimumDelay);
+        double randomDelay;
+
+        if (maximumJitteredDelay <= minimumDelay) {
+            randomDelay = minimumDelay;
+        } else {
+            randomDelay = ThreadLocalRandom.current().nextDouble(
+                    minimumDelay,
+                    maximumJitteredDelay
+            );
+        }
 
         long finalDelay = Math.max(
                 1,
                 Math.round(randomDelay)
         );
 
-        return Instant.now().plusSeconds(finalDelay);
+        finalDelay = Math.min(finalDelay, maximumDelay);
+
+        return now.plusSeconds(finalDelay);
     }
 
-
     /*
-     * Used by the recovery service.
-     * We intentionally do not verify a worker ID here because
-     * the previous worker is presumed to have crashed.
+     * Called by the recovery service while its transaction
+     * holds the row lock obtained through FOR UPDATE SKIP LOCKED.
      */
     @Transactional
     public void recoverExpiredRecord(
@@ -170,15 +181,15 @@ public class NotificationOutboxRetryService {
             Instant now
     ) {
 
-        if (outbox == null) {
+        if (outbox == null || now == null) {
             throw new IllegalArgumentException(
-                    "Outbox record is required."
+                    "Outbox record and recovery time are required."
             );
         }
 
         if (outbox.getStatus() != NotificationOutboxStatus.PROCESSING) {
             throw new IllegalStateException(
-                    "Only processing records can be recovered."
+                    "Only PROCESSING records can be recovered."
             );
         }
 
@@ -190,7 +201,8 @@ public class NotificationOutboxRetryService {
             );
         }
 
-        String error = "Worker lease expired before publishing completion.";
+        String error =
+                "Publishing worker lease expired before completion.";
 
         if (!outbox.hasAttemptsRemaining()) {
 
@@ -199,7 +211,8 @@ public class NotificationOutboxRetryService {
             );
 
             log.error(
-                    "Expired outbox record dead-lettered. outboxId={}, attempts={}",
+                    "Expired outbox record dead-lettered. "
+                            + "outboxId={}, attempts={}",
                     outbox.getId(),
                     outbox.getAttemptCount()
             );
@@ -207,12 +220,13 @@ public class NotificationOutboxRetryService {
             return;
         }
 
-        Instant nextAttemptAt = calculateNextAttemptAt(
-                outbox.getAttemptCount()
+        Instant retryAt = calculateNextAttemptAt(
+                outbox.getAttemptCount(),
+                now
         );
 
         outbox.recoverExpiredLease(
-                nextAttemptAt,
+                retryAt,
                 error
         );
 
@@ -221,10 +235,9 @@ public class NotificationOutboxRetryService {
                         + "outboxId={}, attempts={}, nextAttemptAt={}",
                 outbox.getId(),
                 outbox.getAttemptCount(),
-                nextAttemptAt
+                retryAt
         );
     }
-
 
     private void verifyWorkerOwnership(
             NotificationOutbox outbox,
@@ -237,34 +250,34 @@ public class NotificationOutboxRetryService {
             );
         }
 
-        if (!workerId.equals(outbox.getLockedBy())) {
+        if (outbox.getStatus() != NotificationOutboxStatus.PROCESSING
+                || !workerId.equals(outbox.getLockedBy())) {
+
             throw new IllegalStateException(
-                    "Worker does not own this outbox record."
+                    "Worker does not own this processing outbox record."
             );
         }
     }
 
+    /*
+     * Do not persist arbitrary exception messages. They may contain
+     * email addresses, verification URLs, reset tokens or payload data.
+     */
+    private String resolveSafeError(Throwable failure) {
 
-    private String resolveError(Throwable failure) {
+        String error;
 
         if (failure == null) {
-            return "Unknown notification outbox publishing failure.";
+            error = "Unknown notification publishing failure.";
+        } else {
+            error = "Publishing failed: "
+                    + failure.getClass().getSimpleName();
         }
 
-        String message = failure.getMessage();
-
-        if (message == null || message.isBlank()) {
-            message = failure.getClass().getSimpleName();
+        if (error.length() > MAX_ERROR_LENGTH) {
+            error = error.substring(0, MAX_ERROR_LENGTH);
         }
 
-        /*
-         * Keep the stored error useful without allowing
-         * exceptionally large exception messages into the DB.
-         */
-        if (message.length() > 5000) {
-            message = message.substring(0, 5000);
-        }
-
-        return message;
+        return error;
     }
 }
