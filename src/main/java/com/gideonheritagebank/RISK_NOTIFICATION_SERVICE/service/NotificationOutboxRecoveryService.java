@@ -58,19 +58,16 @@ public class NotificationOutboxRecoveryService {
 
             } catch (Exception exception) {
 
-                /*
-                 * An unexpected failure should not cause us
-                 * to silently mark a record as recovered.
-                 *
-                 * Rethrowing rolls back the entire batch.
-                 */
                 log.error(
                         "Failed to recover expired outbox lease. outboxId={}",
                         outbox.getId(),
                         exception
                 );
 
-                throw exception;
+                throw new IllegalStateException(
+                        "Outbox lease recovery failed.",
+                        exception
+                );
             }
         }
 

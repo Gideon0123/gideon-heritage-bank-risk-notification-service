@@ -1,6 +1,8 @@
 package com.gideonheritagebank.RISK_NOTIFICATION_SERVICE.service;
 
+import com.gideonheritagebank.RISK_NOTIFICATION_SERVICE.config.NotificationOutboxProperties;
 import com.gideonheritagebank.RISK_NOTIFICATION_SERVICE.dto.response.NotificationOutboxMonitoringResponse;
+import com.gideonheritagebank.RISK_NOTIFICATION_SERVICE.dto.response.NotificationOutboxMonitoringSnapshot;
 import com.gideonheritagebank.RISK_NOTIFICATION_SERVICE.entity.NotificationOutbox;
 import com.gideonheritagebank.RISK_NOTIFICATION_SERVICE.enums.NotificationOutboxStatus;
 import com.gideonheritagebank.RISK_NOTIFICATION_SERVICE.repository.NotificationOutboxRepository;
@@ -9,7 +11,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.time.Instant;
+import java.util.*;
 
 @Service
 @RequiredArgsConstructor
@@ -18,67 +22,140 @@ import java.time.Instant;
 public class NotificationOutboxMonitoringService {
 
     private final NotificationOutboxRepository outboxRepository;
+    private final NotificationOutboxProperties properties;
 
-    public NotificationOutboxMonitoringResponse getMonitoringSummary() {
 
-        long pending = count(NotificationOutboxStatus.PENDING);
+    public NotificationOutboxMonitoringSnapshot getSnapshot() {
 
-        long processing = count(NotificationOutboxStatus.PROCESSING);
+        Instant now = Instant.now();
 
-        long retryScheduled = count(NotificationOutboxStatus.RETRY_SCHEDULED);
+        Map<NotificationOutboxStatus, Long> counts =
+                new EnumMap<>(NotificationOutboxStatus.class);
 
-        long published = count(NotificationOutboxStatus.PUBLISHED);
+        long totalRecords = 0;
 
-        long deadLettered = count(NotificationOutboxStatus.DEAD_LETTERED);
+        /*
+         * Initialize every status, including statuses that
+         * currently have zero records.
+         */
+        for (NotificationOutboxStatus status : NotificationOutboxStatus.values()) {
 
-        long total = pending
-                + processing
-                + retryScheduled
-                + published
-                + deadLettered;
+            long count = outboxRepository.countByStatus(status);
 
-        Instant oldestPending = findOldestCreatedAt(
-                NotificationOutboxStatus.PENDING
+            counts.put(status, count);
+
+            totalRecords += count;
+        }
+
+        long pending = counts.getOrDefault(
+                NotificationOutboxStatus.PENDING,
+                0L
         );
 
-        Instant oldestRetry = findOldestCreatedAt(
-                NotificationOutboxStatus.RETRY_SCHEDULED
+        long processing = counts.getOrDefault(
+                NotificationOutboxStatus.PROCESSING,
+                0L
         );
 
-        Instant oldestProcessing = findOldestCreatedAt(
-                NotificationOutboxStatus.PROCESSING
+        long retryScheduled = counts.getOrDefault(
+                NotificationOutboxStatus.RETRY_SCHEDULED,
+                0L
         );
 
-        Instant oldestDeadLetter = findOldestCreatedAt(
-                NotificationOutboxStatus.DEAD_LETTERED
+        long published = counts.getOrDefault(
+                NotificationOutboxStatus.PUBLISHED,
+                0L
         );
 
-        return new NotificationOutboxMonitoringResponse(
-                total,
+        long deadLettered = counts.getOrDefault(
+                NotificationOutboxStatus.DEAD_LETTERED,
+                0L
+        );
+
+        /*
+         * The oldest pending record is based on creation time.
+         * This indicates how long work has been waiting in the
+         * outbox, even if it is not yet eligible for retry.
+         */
+        Optional<NotificationOutbox> oldestPending =
+                outboxRepository.findFirstByStatusInOrderByCreatedAtAsc(
+                        List.of(
+                                NotificationOutboxStatus.PENDING,
+                                NotificationOutboxStatus.RETRY_SCHEDULED
+                        )
+                );
+
+        Instant oldestPendingCreatedAt = oldestPending
+                .map(NotificationOutbox::getCreatedAt)
+                .orElse(null);
+
+        Long oldestPendingAgeSeconds = oldestPendingCreatedAt == null
+                ? null
+                : Math.max(
+                0,
+                Duration.between(oldestPendingCreatedAt, now).getSeconds()
+        );
+
+        boolean backlogAlert = oldestPendingAgeSeconds != null
+                && oldestPendingAgeSeconds >=
+                properties.getMonitoringOldestPendingThresholdSeconds();
+
+        if (backlogAlert) {
+
+            log.warn(
+                    "Notification outbox backlog threshold exceeded. "
+                            + "oldestPendingAgeSeconds={}, pending={}, retryScheduled={}",
+                    oldestPendingAgeSeconds,
+                    pending,
+                    retryScheduled
+            );
+        }
+
+        return new NotificationOutboxMonitoringSnapshot(
+                Collections.unmodifiableMap(counts),
+                totalRecords,
                 pending,
                 processing,
                 retryScheduled,
                 published,
                 deadLettered,
-                oldestPending,
-                oldestRetry,
-                oldestProcessing,
-                oldestDeadLetter,
-                Instant.now()
+                oldestPendingCreatedAt,
+                oldestPendingAgeSeconds,
+                backlogAlert,
+                now
         );
     }
 
-    private long count(NotificationOutboxStatus status) {
 
-        return outboxRepository.countByStatus(status);
+    public Map<NotificationOutboxStatus, Long> getStatusCounts() {
+
+        Map<NotificationOutboxStatus, Long> counts =
+                new EnumMap<>(NotificationOutboxStatus.class);
+
+        for (NotificationOutboxStatus status : NotificationOutboxStatus.values()) {
+
+            counts.put(
+                    status,
+                    outboxRepository.countByStatus(status)
+            );
+        }
+
+        return Collections.unmodifiableMap(counts);
     }
 
-    private Instant findOldestCreatedAt(
-            NotificationOutboxStatus status
-    ) {
-        return outboxRepository
-                .findFirstByStatusOrderByCreatedAtAsc(status)
-                .map(NotificationOutbox::getCreatedAt)
-                .orElse(null);
+
+    public long getDeadLetteredCount() {
+
+        return outboxRepository.countByStatus(
+                NotificationOutboxStatus.DEAD_LETTERED
+        );
+    }
+
+
+    public long getPublishedCount() {
+
+        return outboxRepository.countByStatus(
+                NotificationOutboxStatus.PUBLISHED
+        );
     }
 }

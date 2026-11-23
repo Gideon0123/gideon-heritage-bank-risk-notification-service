@@ -114,24 +114,20 @@ public class NotificationOutboxService {
             UUID outboxId,
             String workerId
     ) {
-
         NotificationOutbox outbox = outboxRepository.findByIdForUpdate(outboxId)
                 .orElseThrow(() -> new IllegalStateException(
                         "Notification outbox record not found: " + outboxId
                 ));
 
         if (outbox.getStatus() != NotificationOutboxStatus.PROCESSING) {
-
             throw new IllegalStateException(
-                    "Outbox record is no longer in PROCESSING state."
+                    "Only processing outbox records can be marked as published."
             );
         }
 
         if (outbox.getLockedBy() == null || !outbox.getLockedBy().equals(workerId)) {
 
-            throw new IllegalStateException(
-                    "Worker does not own this outbox record."
-            );
+            throw new IllegalStateException("Worker does not own this outbox record.");
         }
 
         outbox.markPublished();

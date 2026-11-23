@@ -21,7 +21,7 @@ public class NotificationOutboxWorker {
     private final NotificationOutboxPublisher outboxPublisher;
     private final NotificationOutboxService outboxService;
     private final NotificationOutboxRetryService retryService;
-    private final NotificationOutboxProperties outboxProperties;
+    private final NotificationOutboxProperties properties;
     private final String workerId = UUID.randomUUID().toString();
 
     @Scheduled(
@@ -32,15 +32,16 @@ public class NotificationOutboxWorker {
         Instant now = Instant.now();
 
         Instant leaseExpiry = now.plusSeconds(
-                outboxProperties.getLeaseDurationSeconds()
+                properties.getLeaseDurationSeconds()
         );
 
-        List<NotificationOutbox> records = outboxRepository.claimAvailable(
-                workerId,
-                now,
-                leaseExpiry,
-                outboxProperties.getBatchSize()
-        );
+        List<NotificationOutbox> records =
+                outboxRepository.claimAvailable(
+                        workerId,
+                        now,
+                        leaseExpiry,
+                        properties.getBatchSize()
+                );
 
         if (records.isEmpty()) {
             return;
@@ -53,21 +54,23 @@ public class NotificationOutboxWorker {
         );
 
         for (NotificationOutbox outbox : records) {
-
             processRecord(outbox);
         }
     }
+
 
     private void processRecord(NotificationOutbox outbox) {
 
         try {
 
-            /* Publish to RabbitMQ and wait for publisher confirmation. */
+            /*
+             * Publishes to RabbitMQ and waits for the publisher
+             * confirmation.
+             */
             outboxPublisher.publish(outbox);
 
             /*
-             * Only mark published after successful broker confirmation.
-             * This method verifies that the worker still owns the record.
+             * Mark as published only after a successful broker ACK.
              */
             outboxService.markPublished(
                     outbox.getId(),
@@ -75,17 +78,20 @@ public class NotificationOutboxWorker {
             );
 
             log.info(
-                    "Notification outbox record published. outboxId={}, messageId={}",
+                    "Notification delivery request published. "
+                            + "outboxId={}, deliveryId={}, messageId={}",
                     outbox.getId(),
+                    outbox.getDeliveryId(),
                     outbox.getMessageId()
             );
 
         } catch (Exception exception) {
 
             log.error(
-                    "Notification outbox publishing failed. outboxId={}, attempt={}",
+                    "Notification outbox publishing failed. "
+                            + "outboxId={}, workerId={}",
                     outbox.getId(),
-                    outbox.getAttemptCount(),
+                    workerId,
                     exception
             );
 
@@ -100,16 +106,15 @@ public class NotificationOutboxWorker {
             } catch (Exception retryException) {
 
                 /*
-                 * This could indicate that the lease was reclaimed,
-                 * the worker no longer owns the record, or a database
-                 * update failed.
-                 *
-                 * Never blindly overwrite the record in this situation.
+                 * If retry scheduling fails, the record remains
+                 * PROCESSING. The lease recovery service will
+                 * eventually recover it.
                  */
                 log.error(
-                        "Could not update failed outbox record. outboxId={}, workerId={}",
+                        "Could not schedule outbox retry. "
+                                + "The lease recovery worker will handle it. "
+                                + "outboxId={}",
                         outbox.getId(),
-                        workerId,
                         retryException
                 );
             }
