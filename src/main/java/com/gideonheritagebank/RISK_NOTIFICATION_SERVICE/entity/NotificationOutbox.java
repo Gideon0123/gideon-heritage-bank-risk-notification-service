@@ -351,4 +351,42 @@ public class NotificationOutbox {
             );
         }
     }
+
+    public void recoverExpiredLease(Instant nextAttemptAt) {
+
+        if (status != NotificationOutboxStatus.PROCESSING) {
+
+            throw new IllegalStateException(
+                    "Only processing records can have their leases recovered."
+            );
+        }
+
+        if (lockedUntil == null || lockedUntil.isAfter(Instant.now())) {
+
+            throw new IllegalStateException("The outbox lease has not expired.");
+        }
+
+        if (attemptCount >= maxAttempts) {
+
+            markDeadLettered(
+                    "Maximum publishing attempts reached after worker lease expiry."
+            );
+
+            return;
+        }
+
+        if (nextAttemptAt == null || !nextAttemptAt.isAfter(Instant.now())) {
+
+            throw new IllegalArgumentException(
+                    "Next attempt time must be in the future."
+            );
+        }
+
+        this.status = NotificationOutboxStatus.RETRY_SCHEDULED;
+
+        this.availableAt = nextAttemptAt;
+        this.lastError = "Previous worker lease expired before completion.";
+
+        clearLease();
+    }
 }
