@@ -40,6 +40,10 @@ import java.util.UUID;
                 @Index(
                         name = "idx_notification_delivery_provider_message",
                         columnList = "provider_message_id"
+                ),
+                @Index(
+                        name = "idx_notification_delivery_expired_lease",
+                        columnList = "locked_until"
                 )
         }
 )
@@ -55,14 +59,18 @@ public class NotificationDelivery {
     @JoinColumn(
             name = "notification_id",
             nullable = false,
-            foreignKey = @ForeignKey(name = "fk_notification_delivery_notification")
+            foreignKey = @ForeignKey(
+                    name = "fk_notification_delivery_notification"
+            )
     )
     private Notification notification;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(
             name = "template_id",
-            foreignKey = @ForeignKey(name = "fk_notification_delivery_template")
+            foreignKey = @ForeignKey(
+                    name = "fk_notification_delivery_template"
+            )
     )
     private NotificationTemplate template;
 
@@ -82,14 +90,6 @@ public class NotificationDelivery {
     )
     private NotificationDeliveryStatus status = NotificationDeliveryStatus.PENDING;
 
-    /*
-     * AES-GCM encrypted destination.
-     * For EMAIL, this contains an encrypted email address.
-     * For SMS, this contains an encrypted phone number.
-     * For PUSH, this contains an encrypted destination token.
-     * IN_APP normally does not need a destination because
-     * the parent Notification already contains userId.
-     */
     @Column(
             name = "encrypted_destination",
             columnDefinition = "TEXT"
@@ -102,11 +102,6 @@ public class NotificationDelivery {
     )
     private String subject;
 
-    /*
-     * AES-GCM encrypted rendered content.
-     * This may contain password-reset URLs, verification
-     * links or other sensitive notification content.
-     */
     @Column(
             name = "encrypted_content",
             nullable = false,
@@ -170,6 +165,20 @@ public class NotificationDelivery {
     )
     private String lastError;
 
+    /*
+     * Worker lease.
+     *
+     * Only PROCESSING deliveries may have these fields populated.
+     */
+    @Column(name = "locked_until")
+    private Instant lockedUntil;
+
+    @Column(
+            name = "locked_by",
+            length = 150
+    )
+    private String lockedBy;
+
     @CreationTimestamp
     @Column(
             name = "created_at",
@@ -192,14 +201,7 @@ public class NotificationDelivery {
     )
     private long version;
 
-
     // FACTORY
-
-    /*
-     * The caller must encrypt destination and content
-     * using InboxPayloadEncryptionService before calling
-     * this factory.
-     */
     public static NotificationDelivery create(
             NotificationChannel channel,
             NotificationTemplate template,
@@ -210,7 +212,6 @@ public class NotificationDelivery {
             String idempotencyKey,
             int maxAttempts
     ) {
-
         if (channel == null) {
             throw new IllegalArgumentException("Delivery channel is required.");
         }
@@ -227,26 +228,24 @@ public class NotificationDelivery {
             throw new IllegalArgumentException("Maximum attempts must be at least 1.");
         }
 
-        if (channel != NotificationChannel.IN_APP
-                && (encryptedDestination == null
+        if (channel != NotificationChannel.IN_APP && (encryptedDestination == null
                 || encryptedDestination.isBlank())) {
 
-            throw new IllegalArgumentException(
-                    "Encrypted destination is required for this channel."
-            );
+            throw new IllegalArgumentException("Encrypted destination is required for this channel.");
         }
 
-        if (idempotencyKey != null
-                && (idempotencyKey.isBlank()
-                || idempotencyKey.length() > 255)) {
+        if (idempotencyKey != null && (idempotencyKey.isBlank() || idempotencyKey.length() > 255)) {
 
             throw new IllegalArgumentException("Delivery idempotency key is invalid.");
         }
 
         if (template != null && template.getChannel() != channel) {
-            throw new IllegalArgumentException(
-                    "Delivery channel must match the template channel."
-            );
+            throw new IllegalArgumentException("Delivery channel must match the template channel.");
+        }
+
+        if (channel == NotificationChannel.EMAIL && (subject == null || subject.isBlank())) {
+
+            throw new IllegalArgumentException("Email delivery subject is required.");
         }
 
         NotificationDelivery delivery = new NotificationDelivery();
@@ -264,7 +263,6 @@ public class NotificationDelivery {
         return delivery;
     }
 
-
     // RELATIONSHIP MANAGEMENT
     void assignNotification(Notification notification) {
 
@@ -275,23 +273,38 @@ public class NotificationDelivery {
         this.notification = notification;
     }
 
+    // DELIVERY CLAIM
+    public void markProcessing(
+            String workerId,
+            Instant leaseExpiry
+    ) {
+        if (workerId == null || workerId.isBlank()) {
+            throw new IllegalArgumentException("Delivery worker ID is required.");
+        }
 
-    // =====================================================
-    // DELIVERY LIFECYCLE
-    // =====================================================
+        if (workerId.length() > 150) {
+            throw new IllegalArgumentException("Delivery worker ID cannot exceed 150 characters.");
+        }
 
-    public void markProcessing() {
+        if (leaseExpiry == null || !leaseExpiry.isAfter(Instant.now())) {
+            throw new IllegalArgumentException("Delivery lease expiry must be in the future.");
+        }
 
-        if (isTerminal()) {
+        if (status != NotificationDeliveryStatus.PENDING
+                && status != NotificationDeliveryStatus.RETRY_SCHEDULED) {
+
             throw new IllegalStateException(
-                    "A terminal delivery cannot be processed."
+                    "Only PENDING or RETRY_SCHEDULED deliveries can be claimed."
             );
         }
 
+        if (nextAttemptAt != null && nextAttemptAt.isAfter(Instant.now())) {
+
+            throw new IllegalStateException("Delivery is not ready for another attempt.");
+        }
+
         if (attemptCount >= maxAttempts) {
-            throw new IllegalStateException(
-                    "Maximum delivery attempts have been reached."
-            );
+            throw new IllegalStateException("Maximum delivery attempts have been reached.");
         }
 
         this.status = NotificationDeliveryStatus.PROCESSING;
@@ -299,22 +312,34 @@ public class NotificationDelivery {
         this.lastAttemptAt = Instant.now();
         this.nextAttemptAt = null;
         this.lastError = null;
+
+        this.lockedBy = workerId;
+        this.lockedUntil = leaseExpiry;
     }
 
+    // SUCCESSFUL SMTP SUBMISSION
     public void markSent(
             String provider,
             String providerMessageId
     ) {
         requireStatus(NotificationDeliveryStatus.PROCESSING);
 
+        if (provider == null || provider.isBlank()) {
+            throw new IllegalArgumentException("Delivery provider is required.");
+        }
+
         this.status = NotificationDeliveryStatus.SENT;
         this.provider = provider;
         this.providerMessageId = providerMessageId;
         this.sentAt = Instant.now();
+
         this.nextAttemptAt = null;
         this.lastError = null;
+
+        clearLease();
     }
 
+    // PROVIDER DELIVERY CONFIRMATION
     public void markDelivered() {
 
         if (status != NotificationDeliveryStatus.SENT
@@ -327,72 +352,123 @@ public class NotificationDelivery {
 
         this.status = NotificationDeliveryStatus.DELIVERED;
         this.deliveredAt = Instant.now();
+
         this.nextAttemptAt = null;
         this.lastError = null;
+
+        clearLease();
     }
 
+    // RETRY
     public void scheduleRetry(
             Instant nextAttemptAt,
             String error
     ) {
-
         requireStatus(NotificationDeliveryStatus.PROCESSING);
 
         if (attemptCount >= maxAttempts) {
-            markFailed(error);
+            markDeadLettered(error);
             return;
         }
 
         if (nextAttemptAt == null || !nextAttemptAt.isAfter(Instant.now())) {
 
-            throw new IllegalArgumentException("Next attempt time must be in the future.");
+            throw new IllegalArgumentException("Next delivery attempt must be in the future.");
         }
 
         this.status = NotificationDeliveryStatus.RETRY_SCHEDULED;
         this.nextAttemptAt = nextAttemptAt;
-        this.lastError = error;
+        this.lastError = sanitizeError(error);
+
+        clearLease();
     }
 
+    // PERMANENT FAILURE
     public void markFailed(String error) {
 
         if (status == NotificationDeliveryStatus.DELIVERED
+                || status == NotificationDeliveryStatus.SENT
                 || status == NotificationDeliveryStatus.CANCELLED) {
 
             throw new IllegalStateException(
-                    "Delivered or cancelled deliveries cannot be marked as failed."
+                    "Sent, delivered or cancelled deliveries cannot be marked as failed."
             );
         }
 
         this.status = NotificationDeliveryStatus.FAILED;
         this.failedAt = Instant.now();
         this.nextAttemptAt = null;
-        this.lastError = error;
+        this.lastError = sanitizeError(error);
+
+        clearLease();
     }
 
+    // EXHAUSTED RETRIES
     public void markDeadLettered(String error) {
 
-        if (status == NotificationDeliveryStatus.DELIVERED
+        if (status == NotificationDeliveryStatus.SENT
+                || status == NotificationDeliveryStatus.DELIVERED
                 || status == NotificationDeliveryStatus.CANCELLED) {
 
             throw new IllegalStateException(
-                    "Delivered or cancelled deliveries cannot be dead-lettered."
+                    "Sent, delivered or cancelled deliveries cannot be dead-lettered."
             );
         }
 
         this.status = NotificationDeliveryStatus.DEAD_LETTERED;
+        this.failedAt = Instant.now();
         this.nextAttemptAt = null;
-        this.lastError = error;
+        this.lastError = sanitizeError(error);
+
+        clearLease();
     }
 
+    // EXPIRED LEASE RECOVERY
+    public void recoverExpiredLease(
+            Instant now,
+            Instant nextAttemptAt,
+            String error
+    ) {
+
+        requireStatus(NotificationDeliveryStatus.PROCESSING);
+
+        if (lockedUntil == null || lockedUntil.isAfter(now)) {
+            throw new IllegalStateException("Delivery lease has not expired.");
+        }
+
+        if (attemptCount >= maxAttempts) {
+
+            markDeadLettered(
+                    error + " Maximum delivery attempts reached."
+            );
+
+            return;
+        }
+
+        if (nextAttemptAt == null || !nextAttemptAt.isAfter(now)) {
+            throw new IllegalArgumentException("Next delivery attempt must be in the future.");
+        }
+
+        this.status = NotificationDeliveryStatus.RETRY_SCHEDULED;
+        this.nextAttemptAt = nextAttemptAt;
+        this.lastError = sanitizeError(error);
+
+        clearLease();
+    }
+
+    // CANCELLATION
     public void cancel(String reason) {
 
-        if (status == NotificationDeliveryStatus.DELIVERED) {
-            throw new IllegalStateException("A delivered notification cannot be cancelled.");
+        if (status == NotificationDeliveryStatus.DELIVERED || status == NotificationDeliveryStatus.SENT) {
+
+            throw new IllegalStateException("A sent or delivered notification cannot be cancelled.");
         }
 
         this.status = NotificationDeliveryStatus.CANCELLED;
         this.nextAttemptAt = null;
-        this.lastError = reason;
+        this.lastError = sanitizeError(reason);
+
+        clearLease();
     }
 
     // HELPERS
@@ -411,9 +487,29 @@ public class NotificationDelivery {
     private void requireStatus(NotificationDeliveryStatus expected) {
 
         if (status != expected) {
-            throw new IllegalStateException(
-                    "Delivery must be in " + expected + " state."
-            );
+            throw new IllegalStateException("Delivery must be in " + expected + " state.");
         }
+    }
+
+    private void clearLease() {
+        this.lockedBy = null;
+        this.lockedUntil = null;
+    }
+
+    private String sanitizeError(String error) {
+
+        if (error == null || error.isBlank()) {
+            return "Unknown notification delivery failure.";
+        }
+
+        String sanitized = error
+                .replaceAll("[\\r\\n\\t]+", " ")
+                .trim();
+
+        if (sanitized.length() > 5000) {
+            sanitized = sanitized.substring(0, 5000);
+        }
+
+        return sanitized;
     }
 }
