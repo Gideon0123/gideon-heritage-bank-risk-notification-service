@@ -18,58 +18,36 @@ import java.util.UUID;
 public class NotificationOutboxWorker {
 
     private final NotificationOutboxRepository outboxRepository;
-    private final NotificationOutboxPublisher publisher;
+    private final NotificationOutboxPublisher outboxPublisher;
     private final NotificationOutboxService outboxService;
+    private final NotificationOutboxRetryService retryService;
     private final NotificationOutboxProperties outboxProperties;
-
-    /*
-     * Each running application instance has its own worker ID.
-     * This allows us to identify which worker owns a lease
-     * and prevents another worker from completing that record.
-     */
     private final String workerId = UUID.randomUUID().toString();
 
-
-    /**
-     * Periodically claims and publishes available outbox records.
-     * The repository claim operation has its own transaction.
-     * It commits before this method begins publishing messages.
-     */
     @Scheduled(
             fixedDelayString = "${notification.outbox.fixed-delay:1000}"
     )
     public void processOutbox() {
 
         Instant now = Instant.now();
-        Instant leaseExpiry = now.plusSeconds(outboxProperties.getLeaseDurationSeconds());
 
-        List<NotificationOutbox> records;
+        Instant leaseExpiry = now.plusSeconds(
+                outboxProperties.getLeaseDurationSeconds()
+        );
 
-        try {
-
-            records = outboxRepository.claimAvailable(
-                    workerId,
-                    now,
-                    leaseExpiry,
-                    outboxProperties.getBatchSize()
-            );
-
-        } catch (Exception exception) {
-
-            log.error(
-                    "Unable to claim notification outbox records.",
-                    exception
-            );
-
-            return;
-        }
+        List<NotificationOutbox> records = outboxRepository.claimAvailable(
+                workerId,
+                now,
+                leaseExpiry,
+                outboxProperties.getBatchSize()
+        );
 
         if (records.isEmpty()) {
             return;
         }
 
         log.debug(
-                "Worker claimed {} notification outbox records. workerId={}",
+                "Outbox worker claimed {} records. workerId={}",
                 records.size(),
                 workerId
         );
@@ -80,41 +58,61 @@ public class NotificationOutboxWorker {
         }
     }
 
-
     private void processRecord(NotificationOutbox outbox) {
 
         try {
 
-            /* Publish and wait for RabbitMQ confirmation. */
-            publisher.publish(outbox);
+            /* Publish to RabbitMQ and wait for publisher confirmation. */
+            outboxPublisher.publish(outbox);
 
             /*
-             * Only after successful confirmation do we
-             * mark the outbox record as published.
+             * Only mark published after successful broker confirmation.
+             * This method verifies that the worker still owns the record.
              */
             outboxService.markPublished(
                     outbox.getId(),
                     workerId
             );
 
+            log.info(
+                    "Notification outbox record published. outboxId={}, messageId={}",
+                    outbox.getId(),
+                    outbox.getMessageId()
+            );
+
         } catch (Exception exception) {
 
-            /*
-             * We intentionally do not mark the record as
-             * published or failed here.
-             * Part B will introduce the retry service, which
-             * will transition failed publishing attempts into
-             * RETRY_SCHEDULED or DEAD_LETTERED.
-             * Until then, the lease will expire and the
-             * recovery mechanism will reclaim the record.
-             */
             log.error(
-                    "Failed to publish notification outbox record. "
-                            + "outboxId={}, messageId={}",
+                    "Notification outbox publishing failed. outboxId={}, attempt={}",
                     outbox.getId(),
-                    outbox.getMessageId(),
+                    outbox.getAttemptCount(),
                     exception
             );
+
+            try {
+
+                retryService.handlePublishingFailure(
+                        outbox.getId(),
+                        workerId,
+                        exception
+                );
+
+            } catch (Exception retryException) {
+
+                /*
+                 * This could indicate that the lease was reclaimed,
+                 * the worker no longer owns the record, or a database
+                 * update failed.
+                 *
+                 * Never blindly overwrite the record in this situation.
+                 */
+                log.error(
+                        "Could not update failed outbox record. outboxId={}, workerId={}",
+                        outbox.getId(),
+                        workerId,
+                        retryException
+                );
+            }
         }
     }
 }

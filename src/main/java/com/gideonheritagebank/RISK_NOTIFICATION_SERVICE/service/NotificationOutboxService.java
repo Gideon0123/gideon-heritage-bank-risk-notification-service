@@ -7,6 +7,7 @@ import com.gideonheritagebank.RISK_NOTIFICATION_SERVICE.dto.event.NotificationDe
 import com.gideonheritagebank.RISK_NOTIFICATION_SERVICE.entity.Notification;
 import com.gideonheritagebank.RISK_NOTIFICATION_SERVICE.entity.NotificationDelivery;
 import com.gideonheritagebank.RISK_NOTIFICATION_SERVICE.entity.NotificationOutbox;
+import com.gideonheritagebank.RISK_NOTIFICATION_SERVICE.enums.NotificationOutboxStatus;
 import com.gideonheritagebank.RISK_NOTIFICATION_SERVICE.repository.NotificationOutboxRepository;
 import com.gideonheritagebank.RISK_NOTIFICATION_SERVICE.repository.NotificationRepository;
 import lombok.RequiredArgsConstructor;
@@ -113,10 +114,18 @@ public class NotificationOutboxService {
             UUID outboxId,
             String workerId
     ) {
-        NotificationOutbox outbox = outboxRepository.findById(outboxId)
+
+        NotificationOutbox outbox = outboxRepository.findByIdForUpdate(outboxId)
                 .orElseThrow(() -> new IllegalStateException(
                         "Notification outbox record not found: " + outboxId
                 ));
+
+        if (outbox.getStatus() != NotificationOutboxStatus.PROCESSING) {
+
+            throw new IllegalStateException(
+                    "Outbox record is no longer in PROCESSING state."
+            );
+        }
 
         if (outbox.getLockedBy() == null || !outbox.getLockedBy().equals(workerId)) {
 
