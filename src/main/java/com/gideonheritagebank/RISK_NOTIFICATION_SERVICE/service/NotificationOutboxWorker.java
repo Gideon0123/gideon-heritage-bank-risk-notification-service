@@ -17,11 +17,14 @@ import java.util.UUID;
 @Slf4j
 public class NotificationOutboxWorker {
 
+    private static final long LEASE_SAFETY_MARGIN_SECONDS = 30;
+
     private final NotificationOutboxRepository outboxRepository;
     private final NotificationOutboxPublisher outboxPublisher;
     private final NotificationOutboxService outboxService;
     private final NotificationOutboxRetryService retryService;
     private final NotificationOutboxProperties properties;
+
     private final String workerId = UUID.randomUUID().toString();
 
     @Scheduled(
@@ -29,28 +32,30 @@ public class NotificationOutboxWorker {
     )
     public void processOutbox() {
 
+        properties.validateWorkerConfiguration();
+
         Instant now = Instant.now();
 
-        Instant leaseExpiry = now.plusSeconds(
-                properties.getLeaseDurationSeconds()
-        );
+        long effectiveLeaseDuration = calculateEffectiveLeaseDuration();
 
-        List<NotificationOutbox> records =
-                outboxRepository.claimAvailable(
-                        workerId,
-                        now,
-                        leaseExpiry,
-                        properties.getBatchSize()
-                );
+        Instant leaseExpiry = now.plusSeconds(effectiveLeaseDuration);
+
+        List<NotificationOutbox> records = outboxRepository.claimAvailable(
+                workerId,
+                now,
+                leaseExpiry,
+                properties.getBatchSize()
+        );
 
         if (records.isEmpty()) {
             return;
         }
 
         log.debug(
-                "Outbox worker claimed {} records. workerId={}",
+                "Outbox worker claimed records. workerId={}, count={}, leaseSeconds={}",
+                workerId,
                 records.size(),
-                workerId
+                effectiveLeaseDuration
         );
 
         for (NotificationOutbox outbox : records) {
@@ -58,19 +63,14 @@ public class NotificationOutboxWorker {
         }
     }
 
-
     private void processRecord(NotificationOutbox outbox) {
 
         try {
 
-            /*
-             * Publishes to RabbitMQ and waits for the publisher
-             * confirmation.
-             */
             outboxPublisher.publish(outbox);
 
             /*
-             * Mark as published only after a successful broker ACK.
+             * Only mark PUBLISHED after RabbitMQ confirms publication.
              */
             outboxService.markPublished(
                     outbox.getId(),
@@ -106,18 +106,48 @@ public class NotificationOutboxWorker {
             } catch (Exception retryException) {
 
                 /*
-                 * If retry scheduling fails, the record remains
-                 * PROCESSING. The lease recovery service will
-                 * eventually recover it.
+                 * If retry scheduling fails because the database is
+                 * unavailable, the row may remain PROCESSING.
+                 *
+                 * The independent lease recovery worker will recover it
+                 * after locked_until expires.
                  */
                 log.error(
                         "Could not schedule outbox retry. "
-                                + "The lease recovery worker will handle it. "
-                                + "outboxId={}",
+                                + "Lease recovery will handle the record "
+                                + "after expiry. outboxId={}",
                         outbox.getId(),
                         retryException
                 );
             }
         }
+    }
+
+    private long calculateEffectiveLeaseDuration() {
+
+        /*
+         * The worker publishes records sequentially.
+         *
+         * A batch of 20 records with a 10-second confirmation timeout
+         * could take approximately 200 seconds.
+         *
+         * Add a safety margin so the last records do not expire while
+         * the same worker is still processing the batch.
+         */
+
+        long estimatedBatchDuration = Math.multiplyExact(
+                (long) properties.getBatchSize(),
+                properties.getPublisherConfirmTimeoutSeconds()
+        );
+
+        long minimumLease = Math.addExact(
+                estimatedBatchDuration,
+                LEASE_SAFETY_MARGIN_SECONDS
+        );
+
+        return Math.max(
+                properties.getLeaseDurationSeconds(),
+                minimumLease
+        );
     }
 }

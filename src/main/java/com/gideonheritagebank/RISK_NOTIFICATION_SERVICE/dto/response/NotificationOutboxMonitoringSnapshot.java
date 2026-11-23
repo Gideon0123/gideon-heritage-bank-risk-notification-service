@@ -16,6 +16,9 @@ public record NotificationOutboxMonitoringSnapshot(
         long deadLetteredCount,
         Instant oldestPendingCreatedAt,
         Long oldestPendingAgeSeconds,
+        Instant oldestRetryCreatedAt,
+        Instant oldestProcessingCreatedAt,
+        Instant oldestDeadLetterCreatedAt,
         boolean backlogAlert,
         Instant checkedAt
 

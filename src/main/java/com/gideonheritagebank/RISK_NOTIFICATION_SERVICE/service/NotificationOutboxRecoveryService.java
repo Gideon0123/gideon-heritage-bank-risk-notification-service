@@ -21,12 +21,11 @@ public class NotificationOutboxRecoveryService {
     private final NotificationOutboxRetryService retryService;
     private final NotificationOutboxProperties properties;
 
-
     /*
-     * The entire recovery batch is one transaction.
+     * The query uses FOR UPDATE SKIP LOCKED.
      *
-     * The custom repository query uses FOR UPDATE SKIP LOCKED.
-     * The locks remain held until this method's transaction commits.
+     * The row locks remain held while the recovery operations execute
+     * because this entire method is transactional.
      */
     @Transactional
     public int recoverExpiredLeases() {
@@ -44,59 +43,49 @@ public class NotificationOutboxRecoveryService {
         }
 
         int recovered = 0;
+        int deadLettered = 0;
 
         for (NotificationOutbox outbox : expiredRecords) {
 
-            try {
+            boolean attemptsRemain = outbox.hasAttemptsRemaining();
 
-                retryService.recoverExpiredRecord(
-                        outbox,
-                        now
-                );
+            retryService.recoverExpiredRecord(
+                    outbox,
+                    now
+            );
 
+            if (attemptsRemain) {
                 recovered++;
-
-            } catch (Exception exception) {
-
-                log.error(
-                        "Failed to recover expired outbox lease. outboxId={}",
-                        outbox.getId(),
-                        exception
-                );
-
-                throw new IllegalStateException(
-                        "Outbox lease recovery failed.",
-                        exception
-                );
+            } else {
+                deadLettered++;
             }
         }
 
         log.info(
-                "Expired outbox lease recovery completed. "
-                        + "selected={}, processed={}",
+                "Outbox lease recovery completed. "
+                        + "selected={}, recovered={}, deadLettered={}",
                 expiredRecords.size(),
-                recovered
+                recovered,
+                deadLettered
         );
 
-        return recovered;
+        return expiredRecords.size();
     }
 
-
-    /* Runs independently of the normal publisher worker. */
     @Scheduled(
-            fixedDelayString = "${notification.outbox.recovery-fixed-delay:5000}"
+            fixedDelayString =
+                    "${notification.outbox.recovery-fixed-delay:5000}"
     )
     public void runRecovery() {
 
         try {
 
-            int recovered = recoverExpiredLeases();
+            int processed = recoverExpiredLeases();
 
-            if (recovered > 0) {
-
+            if (processed > 0) {
                 log.info(
                         "Outbox recovery worker processed {} expired records.",
-                        recovered
+                        processed
                 );
             }
 

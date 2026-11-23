@@ -1,23 +1,29 @@
 package com.gideonheritagebank.RISK_NOTIFICATION_SERVICE.repository;
 
 import com.gideonheritagebank.RISK_NOTIFICATION_SERVICE.entity.InboxEvent;
+import com.gideonheritagebank.RISK_NOTIFICATION_SERVICE.enums.InboxEventStatus;
+import jakarta.persistence.LockModeType;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.Instant;
+import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
-public interface InboxEventRepository extends JpaRepository<InboxEvent, UUID> {
+public interface InboxEventRepository
+        extends JpaRepository<InboxEvent, UUID> {
 
     /*
-     * PostgreSQL ON CONFLICT makes deduplication safe even when
-     * two application instances receive the same event concurrently.
+     * PostgreSQL ON CONFLICT protects inbox ingestion from duplicate
+     * RabbitMQ deliveries, including concurrent application instances.
      *
-     * Returns:
-     * 1 = a new inbox record was inserted
-     * 0 = the event already existed
+     * 1 = inserted
+     * 0 = already received
      */
     @Modifying
     @Query(
@@ -56,5 +62,35 @@ public interface InboxEventRepository extends JpaRepository<InboxEvent, UUID> {
             @Param("userId") UUID userId,
             @Param("encryptedPayload") String encryptedPayload,
             @Param("receivedAt") Instant receivedAt
+    );
+
+    /*
+     * Select IDs only. Each event is subsequently loaded and locked
+     * inside its own processing transaction.
+     */
+    @Query("""
+            SELECT event.id
+            FROM InboxEvent event
+            WHERE event.status = :status
+              AND (
+                    event.nextAttemptAt IS NULL
+                    OR event.nextAttemptAt <= :now
+              )
+            ORDER BY event.receivedAt ASC
+            """)
+    List<UUID> findProcessableIds(
+            @Param("status") InboxEventStatus status,
+            @Param("now") Instant now,
+            Pageable pageable
+    );
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            SELECT event
+            FROM InboxEvent event
+            WHERE event.id = :id
+            """)
+    Optional<InboxEvent> findByIdForUpdate(
+            @Param("id") UUID id
     );
 }

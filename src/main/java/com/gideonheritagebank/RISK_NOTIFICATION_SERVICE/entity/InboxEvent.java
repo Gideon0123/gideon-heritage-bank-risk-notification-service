@@ -63,10 +63,6 @@ public class InboxEvent {
     )
     private UUID userId;
 
-    /*
-     * The complete original event payload is encrypted before
-     * it is persisted.
-     */
     @Column(
             name = "encrypted_payload",
             nullable = false,
@@ -99,7 +95,15 @@ public class InboxEvent {
     @Column(name = "processed_at")
     private Instant processedAt;
 
-    @Column(name = "last_error", length = 150)
+    @Column(
+            name = "next_attempt_at"
+    )
+    private Instant nextAttemptAt;
+
+    @Column(
+            name = "last_error",
+            length = 150
+    )
     private String lastError;
 
     @Version
@@ -108,4 +112,112 @@ public class InboxEvent {
             nullable = false
     )
     private long version;
+
+
+    // =====================================================
+    // INBOX LIFECYCLE
+    // =====================================================
+
+    public void markProcessing() {
+
+        if (status != InboxEventStatus.RECEIVED) {
+            throw new IllegalStateException(
+                    "Only RECEIVED inbox events can be processed."
+            );
+        }
+
+        if (nextAttemptAt != null
+                && nextAttemptAt.isAfter(Instant.now())) {
+
+            throw new IllegalStateException(
+                    "Inbox event is not ready for another processing attempt."
+            );
+        }
+
+        this.status = InboxEventStatus.PROCESSING;
+        this.attempts++;
+        this.nextAttemptAt = null;
+        this.lastError = null;
+    }
+
+    public void markProcessed() {
+
+        if (status != InboxEventStatus.PROCESSING) {
+            throw new IllegalStateException(
+                    "Only PROCESSING inbox events can be marked as processed."
+            );
+        }
+
+        this.status = InboxEventStatus.PROCESSED;
+        this.processedAt = Instant.now();
+        this.nextAttemptAt = null;
+        this.lastError = null;
+    }
+
+    /*
+     * This method is called in a separate REQUIRES_NEW transaction
+     * after a failed processing transaction has rolled back.
+     *
+     * Therefore, the attempt increment performed by markProcessing()
+     * was rolled back. This method increments the persisted attempt
+     * counter exactly once for the failed attempt.
+     */
+    public void recordFailure(
+            String error,
+            int maxAttempts,
+            Instant nextAttemptAt
+    ) {
+
+        if (status == InboxEventStatus.PROCESSED
+                || status == InboxEventStatus.FAILED) {
+
+            return;
+        }
+
+        if (maxAttempts < 1) {
+            throw new IllegalArgumentException(
+                    "Maximum inbox processing attempts must be positive."
+            );
+        }
+
+        this.attempts++;
+
+        this.lastError = sanitizeError(error);
+
+        if (attempts >= maxAttempts) {
+
+            this.status = InboxEventStatus.FAILED;
+            this.nextAttemptAt = null;
+
+            return;
+        }
+
+        if (nextAttemptAt == null
+                || !nextAttemptAt.isAfter(Instant.now())) {
+
+            throw new IllegalArgumentException(
+                    "Next inbox processing attempt must be in the future."
+            );
+        }
+
+        this.status = InboxEventStatus.RECEIVED;
+        this.nextAttemptAt = nextAttemptAt;
+    }
+
+    private String sanitizeError(String error) {
+
+        if (error == null || error.isBlank()) {
+            return "Unknown inbox processing failure.";
+        }
+
+        String sanitized = error
+                .replaceAll("[\\r\\n\\t]+", " ")
+                .trim();
+
+        if (sanitized.length() > 150) {
+            sanitized = sanitized.substring(0, 150);
+        }
+
+        return sanitized;
+    }
 }

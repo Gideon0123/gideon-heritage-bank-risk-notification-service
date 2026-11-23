@@ -32,4 +32,8 @@ public interface NotificationOutboxRepository
     Optional<NotificationOutbox> findFirstByStatusInOrderByCreatedAtAsc(
             Collection<NotificationOutboxStatus> statuses
     );
+
+    Optional<NotificationOutbox> findFirstByStatusOrderByCreatedAtAsc(
+            NotificationOutboxStatus status
+    );
 }

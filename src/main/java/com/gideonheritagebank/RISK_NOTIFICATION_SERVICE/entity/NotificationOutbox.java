@@ -297,33 +297,6 @@ public class NotificationOutbox {
         clearLease();
     }
 
-    public void recoverExpiredLease() {
-
-        if (status != NotificationOutboxStatus.PROCESSING) {
-            throw new IllegalStateException(
-                    "Only processing records can have their leases recovered."
-            );
-        }
-
-        if (lockedUntil == null || lockedUntil.isAfter(Instant.now())) {
-
-            throw new IllegalStateException("The outbox lease has not expired.");
-        }
-
-        clearLease();
-
-        if (attemptCount >= maxAttempts) {
-            markDeadLettered(
-                    "Maximum publishing attempts reached after worker lease expiry."
-            );
-            return;
-        }
-
-        this.status = NotificationOutboxStatus.RETRY_SCHEDULED;
-        this.availableAt = Instant.now();
-        this.lastError = "Previous worker lease expired before completion.";
-    }
-
     // HELPERS
     public boolean isTerminal() {
 
