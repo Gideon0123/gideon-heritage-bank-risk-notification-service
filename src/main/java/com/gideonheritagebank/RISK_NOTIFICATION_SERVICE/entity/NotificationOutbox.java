@@ -58,19 +58,19 @@ public class NotificationOutbox {
     private NotificationDelivery delivery;
 
     @Column(
-            name = "message_id",
-            nullable = false,
-            unique = true
-    )
-    private UUID messageId;
-
-    @Column(
             name = "delivery_id",
             nullable = false,
             insertable = false,
             updatable = false
     )
     private UUID deliveryId;
+
+    @Column(
+            name = "message_id",
+            nullable = false,
+            unique = true
+    )
+    private UUID messageId;
 
     @Column(
             name = "event_type",
@@ -106,8 +106,7 @@ public class NotificationOutbox {
             nullable = false,
             length = 30
     )
-    private NotificationOutboxStatus status =
-            NotificationOutboxStatus.PENDING;
+    private NotificationOutboxStatus status = NotificationOutboxStatus.PENDING;
 
     @Column(
             name = "attempt_count",
@@ -168,7 +167,6 @@ public class NotificationOutbox {
     private long version;
 
     // FACTORY
-
     public static NotificationOutbox create(
             NotificationDelivery delivery,
             String eventType,
@@ -327,7 +325,6 @@ public class NotificationOutbox {
     }
 
     // HELPERS
-
     public boolean isTerminal() {
 
         return status == NotificationOutboxStatus.PUBLISHED
@@ -352,40 +349,42 @@ public class NotificationOutbox {
         }
     }
 
-    public void recoverExpiredLease(Instant nextAttemptAt) {
+    public void recoverExpiredLease(
+            Instant nextAttemptAt,
+            String error
+    ) {
 
         if (status != NotificationOutboxStatus.PROCESSING) {
-
             throw new IllegalStateException(
                     "Only processing records can have their leases recovered."
             );
         }
 
         if (lockedUntil == null || lockedUntil.isAfter(Instant.now())) {
-
-            throw new IllegalStateException("The outbox lease has not expired.");
+            throw new IllegalStateException(
+                    "The outbox lease has not expired."
+            );
         }
 
         if (attemptCount >= maxAttempts) {
 
             markDeadLettered(
-                    "Maximum publishing attempts reached after worker lease expiry."
+                    "Maximum publishing attempts reached after worker lease expiry. "
+                            + error
             );
 
             return;
         }
 
         if (nextAttemptAt == null || !nextAttemptAt.isAfter(Instant.now())) {
-
             throw new IllegalArgumentException(
-                    "Next attempt time must be in the future."
+                    "Recovery retry time must be in the future."
             );
         }
 
         this.status = NotificationOutboxStatus.RETRY_SCHEDULED;
-
         this.availableAt = nextAttemptAt;
-        this.lastError = "Previous worker lease expired before completion.";
+        this.lastError = error;
 
         clearLease();
     }

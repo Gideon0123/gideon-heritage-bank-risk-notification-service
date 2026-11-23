@@ -19,6 +19,13 @@ public class NotificationOutboxRepositoryImpl implements NotificationOutboxRepos
     @PersistenceContext
     private EntityManager entityManager;
 
+
+    /*
+     * Claims only records that are ready for publication.
+     *
+     * Expired PROCESSING records are deliberately excluded.
+     * They are handled by NotificationOutboxRecoveryService.
+     */
     @Override
     @Transactional
     @SuppressWarnings("unchecked")
@@ -29,40 +36,19 @@ public class NotificationOutboxRepositoryImpl implements NotificationOutboxRepos
             int batchSize
     ) {
 
-        if (workerId == null || workerId.isBlank()) {
-            throw new IllegalArgumentException("Worker ID is required.");
-        }
-
-        if (now == null || leaseExpiry == null
-                || !leaseExpiry.isAfter(now)) {
-
-            throw new IllegalArgumentException(
-                    "A valid lease expiry is required."
-            );
-        }
-
-        if (batchSize < 1) {
-            throw new IllegalArgumentException(
-                    "Batch size must be at least 1."
-            );
-        }
+        validateClaimArguments(
+                workerId,
+                now,
+                leaseExpiry,
+                batchSize
+        );
 
         String sql = """
-                
                 SELECT *
                 FROM notification_outbox
                 WHERE
-                    (
-                        (
-                            status IN ('PENDING', 'RETRY_SCHEDULED')
-                            AND available_at <= :now
-                        )
-                        OR
-                        (
-                            status = 'PROCESSING'
-                            AND locked_until <= :now
-                        )
-                    )
+                    status IN ('PENDING', 'RETRY_SCHEDULED')
+                    AND available_at <= :now
                     AND attempt_count < max_attempts
                 ORDER BY available_at ASC, created_at ASC
                 LIMIT :batchSize
@@ -90,5 +76,77 @@ public class NotificationOutboxRepositoryImpl implements NotificationOutboxRepos
         entityManager.flush();
 
         return records;
+    }
+
+
+    /*
+     * Finds expired leases and locks the selected rows.
+     *
+     * The caller must execute this method inside a transaction
+     * and update the returned records before that transaction
+     * commits. This keeps the row locks during recovery.
+     */
+    @Override
+    @Transactional
+    @SuppressWarnings("unchecked")
+    public List<NotificationOutbox> findExpiredLeasesForRecovery(
+            Instant now,
+            int batchSize
+    ) {
+
+        if (now == null) {
+            throw new IllegalArgumentException(
+                    "Current time is required."
+            );
+        }
+
+        if (batchSize < 1) {
+            throw new IllegalArgumentException(
+                    "Recovery batch size must be at least 1."
+            );
+        }
+
+        String sql = """
+                SELECT *
+                FROM notification_outbox
+                WHERE
+                    status = 'PROCESSING'
+                    AND locked_until <= :now
+                ORDER BY locked_until ASC, created_at ASC
+                LIMIT :batchSize
+                FOR UPDATE SKIP LOCKED
+                """;
+
+        Query query = entityManager.createNativeQuery(
+                sql,
+                NotificationOutbox.class
+        );
+
+        query.setParameter("now", now);
+        query.setParameter("batchSize", batchSize);
+
+        return query.getResultList();
+    }
+
+
+    private void validateClaimArguments(
+            String workerId,
+            Instant now,
+            Instant leaseExpiry,
+            int batchSize
+    ) {
+
+        if (workerId == null || workerId.isBlank()) {
+            throw new IllegalArgumentException("Worker ID is required.");
+        }
+
+        if (now == null || leaseExpiry == null || !leaseExpiry.isAfter(now)) {
+
+            throw new IllegalArgumentException("A valid lease expiry is required.");
+        }
+
+        if (batchSize < 1) {
+            throw new IllegalArgumentException("Batch size must be at least 1.");
+        }
     }
 }

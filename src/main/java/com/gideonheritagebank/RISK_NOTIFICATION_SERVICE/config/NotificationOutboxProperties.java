@@ -4,26 +4,40 @@ import lombok.Getter;
 import lombok.Setter;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
+@ConfigurationProperties(prefix = "notification.outbox")
 @Getter
 @Setter
-@ConfigurationProperties(prefix = "notification.outbox")
 public class NotificationOutboxProperties {
 
     private String exchange = "bank.notification-delivery.exchange";
+
     private String emailRoutingKey = "notification.delivery.email";
     private String pushRoutingKey = "notification.delivery.push";
     private String inAppRoutingKey = "notification.delivery.in-app";
+
+    // Publishing policy
     private int maxAttempts = 10;
     private int batchSize = 20;
     private long fixedDelay = 1000;
     private long leaseDurationSeconds = 60;
     private long publisherConfirmTimeoutSeconds = 10;
 
-    // RETRY CONFIGURATION
-    private Retry retry = new Retry();
+    // Retry policy
+    private long initialRetryDelaySeconds = 5;
+    private long maximumRetryDelaySeconds = 900;
 
-    // RECOVERY CONFIGURATION
-    private Recovery recovery = new Recovery();
+    /*
+     * 0.20 means up to 20% random variation around
+     * the calculated exponential delay.
+     */
+    private double retryJitterFactor = 0.20;
+
+    // Recovery policy
+    private long recoveryFixedDelay = 5000;
+    private int recoveryBatchSize = 50;
+
+    // Monitoring
+    private long monitoringOldestPendingThresholdSeconds = 300;
 
     public String routingKeyFor(String channel) {
 
@@ -38,21 +52,30 @@ public class NotificationOutboxProperties {
         };
     }
 
-    @Getter
-    @Setter
-    public static class Retry {
+    public void validateRetryConfiguration() {
 
-        private long initialDelaySeconds = 5;
-        private double multiplier = 2.0;
-        private long maxDelaySeconds = 3600;
-        private double jitterFactor = 0.25;
-    }
+        if (maxAttempts < 1) {
+            throw new IllegalStateException(
+                    "Outbox maximum attempts must be at least 1."
+            );
+        }
 
-    @Getter
-    @Setter
-    public static class Recovery {
+        if (initialRetryDelaySeconds < 1) {
+            throw new IllegalStateException(
+                    "Initial retry delay must be at least 1 second."
+            );
+        }
 
-        private long fixedDelay = 30000;
-        private int batchSize = 50;
+        if (maximumRetryDelaySeconds < initialRetryDelaySeconds) {
+            throw new IllegalStateException(
+                    "Maximum retry delay cannot be less than initial retry delay."
+            );
+        }
+
+        if (retryJitterFactor < 0 || retryJitterFactor > 1) {
+            throw new IllegalStateException(
+                    "Retry jitter factor must be between 0 and 1."
+            );
+        }
     }
 }

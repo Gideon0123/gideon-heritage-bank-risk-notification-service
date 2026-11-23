@@ -9,8 +9,7 @@ import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
-import java.time.Instant;
-import java.util.List;
+import java.util.Collection;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -19,10 +18,6 @@ public interface NotificationOutboxRepository
         NotificationOutboxRepositoryCustom {
 
     long countByStatus(NotificationOutboxStatus status);
-
-    Optional<NotificationOutbox> findFirstByStatusOrderByCreatedAtAsc(
-            NotificationOutboxStatus status
-    );
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""
@@ -34,20 +29,7 @@ public interface NotificationOutboxRepository
             @Param("id") UUID id
     );
 
-    @Query(
-            value = """
-                    SELECT *
-                    FROM notification_outbox
-                    WHERE status = 'PROCESSING'
-                      AND locked_until <= :now
-                    ORDER BY locked_until ASC
-                    LIMIT :batchSize
-                    FOR UPDATE SKIP LOCKED
-                    """,
-            nativeQuery = true
-    )
-    List<NotificationOutbox> findExpiredLeasesForRecovery(
-            @Param("now") Instant now,
-            @Param("batchSize") int batchSize
+    Optional<NotificationOutbox> findFirstByStatusInOrderByCreatedAtAsc(
+            Collection<NotificationOutboxStatus> statuses
     );
 }

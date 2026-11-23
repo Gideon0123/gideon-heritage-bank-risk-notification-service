@@ -19,69 +19,53 @@ public class NotificationOutboxRecoveryService {
 
     private final NotificationOutboxRepository outboxRepository;
     private final NotificationOutboxRetryService retryService;
-    private final NotificationOutboxProperties outboxProperties;
+    private final NotificationOutboxProperties properties;
 
-    /**
-     * Periodically recovers outbox records whose worker leases
-     * have expired.
+
+    /*
+     * The entire recovery batch is one transaction.
+     *
+     * The custom repository query uses FOR UPDATE SKIP LOCKED.
+     * The locks remain held until this method's transaction commits.
      */
-    @Scheduled(
-            fixedDelayString = "${notification.outbox.recovery.fixed-delay:30000}"
-    )
     @Transactional
-    public void recoverExpiredLeases() {
+    public int recoverExpiredLeases() {
 
         Instant now = Instant.now();
-
-        int batchSize = outboxProperties
-                .getRecovery()
-                .getBatchSize();
-
-        if (batchSize < 1) {
-
-            throw new IllegalStateException(
-                    "Outbox recovery batch size must be at least 1."
-            );
-        }
 
         List<NotificationOutbox> expiredRecords =
                 outboxRepository.findExpiredLeasesForRecovery(
                         now,
-                        batchSize
+                        properties.getRecoveryBatchSize()
                 );
 
         if (expiredRecords.isEmpty()) {
-            return;
+            return 0;
         }
 
         int recovered = 0;
 
-        int deadLettered = 0;
-
         for (NotificationOutbox outbox : expiredRecords) {
 
             try {
-                boolean attemptsRemain = outbox.hasAttemptsRemaining();
 
-                retryService.recoverExpiredRecord(outbox);
+                retryService.recoverExpiredRecord(
+                        outbox,
+                        now
+                );
 
-                if (attemptsRemain) {
-                    recovered++;
-                } else {
-                    deadLettered++;
-                }
+                recovered++;
 
-            } catch (RuntimeException exception) {
+            } catch (Exception exception) {
 
                 /*
-                 * Do not swallow database consistency failures
-                 * and continue committing a partially processed batch.
+                 * An unexpected failure should not cause us
+                 * to silently mark a record as recovered.
                  *
-                 * Propagating the exception causes this transaction
-                 * to roll back.
+                 * Rethrowing rolls back the entire batch.
                  */
                 log.error(
-                        "Failed to recover expired outbox record. outboxId={}",
+                        "Failed to recover expired outbox lease. outboxId={}",
                         outbox.getId(),
                         exception
                 );
@@ -90,11 +74,41 @@ public class NotificationOutboxRecoveryService {
             }
         }
 
-        log.warn(
-                "Outbox lease recovery completed. recovered={}, deadLettered={}, batchSize={}",
-                recovered,
-                deadLettered,
-                expiredRecords.size()
+        log.info(
+                "Expired outbox lease recovery completed. "
+                        + "selected={}, processed={}",
+                expiredRecords.size(),
+                recovered
         );
+
+        return recovered;
+    }
+
+
+    /* Runs independently of the normal publisher worker. */
+    @Scheduled(
+            fixedDelayString = "${notification.outbox.recovery-fixed-delay:5000}"
+    )
+    public void runRecovery() {
+
+        try {
+
+            int recovered = recoverExpiredLeases();
+
+            if (recovered > 0) {
+
+                log.info(
+                        "Outbox recovery worker processed {} expired records.",
+                        recovered
+                );
+            }
+
+        } catch (Exception exception) {
+
+            log.error(
+                    "Notification outbox recovery execution failed.",
+                    exception
+            );
+        }
     }
 }

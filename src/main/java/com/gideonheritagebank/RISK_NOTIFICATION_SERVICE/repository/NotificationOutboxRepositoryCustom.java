@@ -13,4 +13,9 @@ public interface NotificationOutboxRepositoryCustom {
             Instant leaseExpiry,
             int batchSize
     );
+
+    List<NotificationOutbox> findExpiredLeasesForRecovery(
+            Instant now,
+            int batchSize
+    );
 }
