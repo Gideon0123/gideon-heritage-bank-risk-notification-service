@@ -25,38 +25,52 @@ import java.util.UUID;
 public class NotificationOutboxService {
 
     private static final String DELIVERY_EVENT_TYPE = "NOTIFICATION_DELIVERY_REQUESTED";
+
     private final NotificationRepository notificationRepository;
     private final NotificationOutboxRepository outboxRepository;
     private final NotificationOutboxProperties outboxProperties;
     private final ObjectMapper objectMapper;
 
     /**
-     * Persists a notification, all its delivery records,
-     * and the corresponding outbox records in one transaction.
-     * The caller must prepare the notification and attach
-     * its delivery records using notification.addDelivery().
-     * If any operation fails, the complete transaction rolls back.
+     * Persists:
+     * 1. Notification
+     * 2. Its NotificationDelivery records
+     * 3. Corresponding NotificationOutbox records
+     * All records are committed in one database transaction.
+     * If no delivery channels are enabled or available, the
+     * Notification is still persisted, but no outbox record
+     * is created.
      */
     @Transactional
     public UUID createNotificationWithDeliveries(
             Notification notification
     ) {
+
         validateNotification(notification);
 
         /*
-         * Save the notification.
-         * CascadeType.ALL on Notification.deliveries ensures
-         * its delivery records are persisted as well.
+         * Notification.deliveries uses CascadeType.ALL.
+         * Attached delivery records are therefore persisted
+         * together with the notification.
          */
         Notification savedNotification = notificationRepository.saveAndFlush(notification);
 
+        List<NotificationDelivery> deliveries = savedNotification.getDeliveries();
+
+        if (deliveries == null || deliveries.isEmpty()) {
+
+            log.info(
+                    "Notification created without outbound deliveries. "
+                            + "notificationId={}",
+                    savedNotification.getId()
+            );
+
+            return savedNotification.getId();
+        }
+
         List<NotificationOutbox> outboxRecords = new ArrayList<>();
 
-        /*
-         * At this point, Hibernate has flushed the notification
-         * and delivery records, so their generated UUIDs are available.
-         */
-        for (NotificationDelivery delivery : savedNotification.getDeliveries()) {
+        for (NotificationDelivery delivery : deliveries) {
 
             if (delivery.getId() == null) {
                 throw new IllegalStateException(
@@ -68,11 +82,12 @@ public class NotificationOutboxService {
                     delivery.getChannel().name()
             );
 
-            NotificationDeliveryRequestedEvent event = NotificationDeliveryRequestedEvent.create(
-                    delivery.getId(),
-                    savedNotification.getId(),
-                    delivery.getChannel()
-            );
+            NotificationDeliveryRequestedEvent event =
+                    NotificationDeliveryRequestedEvent.create(
+                            delivery.getId(),
+                            savedNotification.getId(),
+                            delivery.getChannel()
+                    );
 
             String payload = serialize(event);
 
@@ -89,67 +104,70 @@ public class NotificationOutboxService {
         }
 
         /*
-         * All outbox records are persisted in the same transaction
-         * as the notification and delivery records.
+         * If saving any outbox record fails, the notification
+         * and all its deliveries also roll back.
          */
         outboxRepository.saveAllAndFlush(outboxRecords);
 
         log.info(
-                "Notification and {} outbox records created. notificationId={}",
-                outboxRecords.size(),
-                savedNotification.getId()
+                "Notification, deliveries and outbox records created. "
+                        + "notificationId={}, deliveryCount={}, outboxCount={}",
+                savedNotification.getId(),
+                deliveries.size(),
+                outboxRecords.size()
         );
 
         return savedNotification.getId();
     }
 
-
     /**
-     * Marks an outbox record as successfully published.
-     * We verify worker ownership so an old worker cannot
-     * update a record that another worker has reclaimed.
+     * Only the worker that currently owns the PROCESSING lease
+     * may mark a record as published.
      */
     @Transactional
     public void markPublished(
             UUID outboxId,
             String workerId
     ) {
-        NotificationOutbox outbox = outboxRepository.findByIdForUpdate(outboxId)
+
+        NotificationOutbox outbox = outboxRepository
+                .findByIdForUpdate(outboxId)
                 .orElseThrow(() -> new IllegalStateException(
                         "Notification outbox record not found: " + outboxId
                 ));
 
         if (outbox.getStatus() != NotificationOutboxStatus.PROCESSING) {
             throw new IllegalStateException(
-                    "Only processing outbox records can be marked as published."
+                    "Only PROCESSING outbox records can be marked as published."
             );
         }
 
-        if (outbox.getLockedBy() == null || !outbox.getLockedBy().equals(workerId)) {
+        if (workerId == null
+                || !workerId.equals(outbox.getLockedBy())) {
 
-            throw new IllegalStateException("Worker does not own this outbox record.");
+            throw new IllegalStateException(
+                    "Worker does not own this outbox record."
+            );
         }
 
         outbox.markPublished();
     }
 
-
     private void validateNotification(Notification notification) {
 
         if (notification == null) {
-            throw new IllegalArgumentException("Notification is required.");
-        }
-
-        if (notification.getDeliveries() == null || notification.getDeliveries().isEmpty()) {
-
-            throw new IllegalArgumentException("At least one notification delivery is required.");
+            throw new IllegalArgumentException(
+                    "Notification is required."
+            );
         }
     }
 
     private String serialize(
             NotificationDeliveryRequestedEvent event
     ) {
+
         try {
+
             return objectMapper.writeValueAsString(event);
 
         } catch (JsonProcessingException exception) {

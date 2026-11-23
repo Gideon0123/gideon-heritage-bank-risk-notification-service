@@ -25,10 +25,8 @@ public class InboxEventProcessingTransaction {
 
     private final InboxEventRepository inboxEventRepository;
     private final NotificationRepository notificationRepository;
-
     private final InboxPayloadEncryptionService encryptionService;
     private final ObjectMapper objectMapper;
-
     private final IdentityEventNotificationFactory notificationFactory;
 
     /*
