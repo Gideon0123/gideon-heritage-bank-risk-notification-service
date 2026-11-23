@@ -1,7 +1,6 @@
 package com.gideonheritagebank.RISK_NOTIFICATION_SERVICE.service;
 
 import com.gideonheritagebank.RISK_NOTIFICATION_SERVICE.config.NotificationOutboxProperties;
-import com.gideonheritagebank.RISK_NOTIFICATION_SERVICE.dto.response.NotificationOutboxMonitoringResponse;
 import com.gideonheritagebank.RISK_NOTIFICATION_SERVICE.dto.response.NotificationOutboxMonitoringSnapshot;
 import com.gideonheritagebank.RISK_NOTIFICATION_SERVICE.entity.NotificationOutbox;
 import com.gideonheritagebank.RISK_NOTIFICATION_SERVICE.enums.NotificationOutboxStatus;
