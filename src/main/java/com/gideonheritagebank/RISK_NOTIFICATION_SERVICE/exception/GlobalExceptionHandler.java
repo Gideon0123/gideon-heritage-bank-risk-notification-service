@@ -51,8 +51,7 @@ public class GlobalExceptionHandler {
         Map<String, String> errors = new TreeMap<>();
 
         exception.getConstraintViolations()
-                .forEach(violation ->
-                        errors.putIfAbsent(
+                .forEach(violation -> errors.putIfAbsent(
                                 violation.getPropertyPath().toString(),
                                 violation.getMessage()
                         )
@@ -244,6 +243,19 @@ public class GlobalExceptionHandler {
     ) {
         return errorResponse(
                 HttpStatus.FORBIDDEN,
+                exception.getMessage(),
+                Map.of(),
+                request
+        );
+    }
+
+    @ExceptionHandler(InvalidEmailDeliveryMessageException.class)
+    public ResponseEntity<ApiResponse<Void>> handleInvalidEmailDeliveryMessage(
+            InvalidEmailDeliveryMessageException exception,
+            HttpServletRequest request
+    ) {
+        return errorResponse(
+                HttpStatus.BAD_REQUEST,
                 exception.getMessage(),
                 Map.of(),
                 request
