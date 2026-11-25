@@ -199,7 +199,7 @@ public class NotificationInboxService {
     private void validatePagination(int page, int size) {
 
         if (page < 1) {
-            throw new IllegalArgumentException("Page number must be at least 1.");
+            page = 1; // Default to the first page if an invalid page number is provided.
         }
 
         if (size < 1 || size > MAX_PAGE_SIZE) {

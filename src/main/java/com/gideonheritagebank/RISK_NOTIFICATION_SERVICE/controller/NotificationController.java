@@ -153,7 +153,6 @@ public class NotificationController {
 
             @PathVariable UUID notificationId,
             HttpServletRequest request
-
     ) {
 
         NotificationResponse response = notificationInboxService.archive(notificationId);
