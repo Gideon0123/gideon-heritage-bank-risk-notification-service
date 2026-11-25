@@ -177,8 +177,7 @@ public class IdentityEventNotificationFactory {
             return;
         }
 
-        String encryptedContent =
-                contentEncryptionService.encryptContent(content);
+        String encryptedContent = contentEncryptionService.encryptContent(content);
 
         String encryptedDestination = destination;
 
@@ -486,12 +485,9 @@ public class IdentityEventNotificationFactory {
                 + channel.name();
 
         try {
-
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
 
-            byte[] hash = digest.digest(
-                    source.getBytes(StandardCharsets.UTF_8)
-            );
+            byte[] hash = digest.digest(source.getBytes(StandardCharsets.UTF_8));
 
             return "identity-" + HexFormat.of().formatHex(hash);
 
@@ -507,23 +503,14 @@ public class IdentityEventNotificationFactory {
     private record NotificationDefinition(
 
             NotificationType notificationType,
-
             NotificationCategory category,
-
             String templateKey,
-
             String notificationTitle,
-
             String notificationBody,
-
             String emailDestination,
-
             Instant expiresAt,
-
             Map<String, String> templateVariables,
-
             List<String> requestedChannels
-
     ) {
     }
 }
