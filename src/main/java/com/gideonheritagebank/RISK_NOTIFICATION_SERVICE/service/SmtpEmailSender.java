@@ -2,7 +2,6 @@ package com.gideonheritagebank.RISK_NOTIFICATION_SERVICE.service;
 
 import com.gideonheritagebank.RISK_NOTIFICATION_SERVICE.config.NotificationEmailProperties;
 import com.gideonheritagebank.RISK_NOTIFICATION_SERVICE.enums.NotificationContentFormat;
-import jakarta.mail.Message;
 import jakarta.mail.MessagingException;
 import jakarta.mail.internet.InternetAddress;
 import jakarta.mail.internet.MimeMessage;
@@ -30,29 +29,16 @@ public class SmtpEmailSender {
             String content,
             NotificationContentFormat contentFormat
     ) {
+        if (deliveryId == null
+                || recipient == null || recipient.isBlank()
+                || subject == null || subject.isBlank()
+                || content == null || content.isBlank()
+                || contentFormat == null) {
 
-        if (deliveryId == null) {
-            throw new IllegalArgumentException("Email delivery ID is required.");
-        }
-
-        if (recipient == null || recipient.isBlank()) {
-            throw new IllegalArgumentException("Email recipient is required.");
-        }
-
-        if (subject == null || subject.isBlank()) {
-            throw new IllegalArgumentException("Email subject is required.");
-        }
-
-        if (content == null || content.isBlank()) {
-            throw new IllegalArgumentException("Email content is required.");
-        }
-
-        if (contentFormat == null) {
-            throw new IllegalArgumentException("Email content format is required.");
+            throw new IllegalArgumentException("Email delivery information is incomplete.");
         }
 
         properties.validate();
-
         MimeMessage mimeMessage = mailSender.createMimeMessage();
 
         try {
@@ -69,46 +55,25 @@ public class SmtpEmailSender {
             );
 
             helper.setFrom(fromAddress);
+            helper.setTo(recipient);
+            helper.setSubject(subject);
 
             if (properties.getReplyTo() != null && !properties.getReplyTo().isBlank()) {
 
                 helper.setReplyTo(properties.getReplyTo());
             }
 
-            helper.setTo(recipient);
-
-            helper.setSubject(subject);
-
             boolean html = contentFormat == NotificationContentFormat.HTML;
 
-            helper.setText(
-                    content,
-                    html
-            );
+            helper.setText(content, html);
 
-            /*
-             * Stable identifier for tracing and duplicate investigation.
-             *
-             * This does not provide exactly-once SMTP delivery.
-             */
             mimeMessage.setHeader(
                     "X-GHB-Notification-Delivery-ID",
                     deliveryId.toString()
             );
 
-            mimeMessage.setHeader(
-                    "X-GHB-Notification-Provider",
-                    properties.getProvider()
-            );
-
-            mimeMessage.setDisposition(Message.RecipientType.TO.toString());
-
         } catch (Exception exception) {
 
-            /*
-             * Message preparation errors are not SMTP transport
-             * failures. The caller treats them as permanent failures.
-             */
             throw new IllegalStateException(
                     "Could not prepare the notification email message.",
                     exception
@@ -116,10 +81,8 @@ public class SmtpEmailSender {
         }
 
         /*
-         * Do not catch MailException here.
-         *
-         * The execution service needs to distinguish SMTP transport
-         * failures so it can schedule retries.
+         * Spring Mail transport errors propagate as MailException.
+         * EmailDeliveryExecutionService catches them and schedules retry.
          */
         mailSender.send(mimeMessage);
 
@@ -133,12 +96,6 @@ public class SmtpEmailSender {
                     deliveryId
             );
         }
-
-        log.info(
-                "Email submitted to SMTP provider. deliveryId={}, provider={}",
-                deliveryId,
-                properties.getProvider()
-        );
 
         return new EmailSendResult(
                 properties.getProvider(),

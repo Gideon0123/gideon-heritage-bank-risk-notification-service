@@ -89,18 +89,19 @@ public class EmailDeliveryExecutionService {
 
         } catch (MailException exception) {
 
-            /*
-             * SMTP transport/provider failure.
-             *
-             * Keep the delivery retryable until maxAttempts
-             * has been exhausted.
-             */
-            log.warn(
-                    "SMTP delivery failed. Scheduling retry. "
-                            + "deliveryId={}, attempt={}, exceptionType={}",
+            log.error(
+                    """
+                    SMTP DELIVERY FAILURE
+                    Delivery ID: {}
+                    Attempt: {}
+                    Exception Type: {}
+                    Exception Message: {}
+                    """,
                     claimed.deliveryId(),
                     claimed.attemptNumber(),
-                    exception.getClass().getSimpleName()
+                    exception.getClass().getName(),
+                    exception.getMessage(),
+                    exception
             );
 
             stateService.scheduleRetry(

@@ -80,7 +80,8 @@ public class EmailDeliveryConsumer {
                     event.deliveryId()
             );
 
-        } catch (InvalidEmailDeliveryMessageException exception) {
+        } catch (InvalidEmailDeliveryMessageException
+                 | com.fasterxml.jackson.core.JsonProcessingException exception) {
 
             /*
              * Malformed messages and invalid event contracts

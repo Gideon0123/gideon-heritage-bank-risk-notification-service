@@ -219,24 +219,6 @@ public class EmailDeliveryStateService {
             return "Unknown email delivery failure.";
         }
 
-        /*
-         * Avoid persisting raw message bodies, destinations,
-         * credentials or other sensitive exception content.
-         */
-        String message = failure.getMessage();
-
-        if (message == null || message.isBlank()) {
-            return failure.getClass().getSimpleName();
-        }
-
-        String safeMessage = failure.getClass().getSimpleName()
-                + ": "
-                + message.replaceAll("[\\r\\n\\t]+", " ").trim();
-
-        if (safeMessage.length() > 5000) {
-            safeMessage = safeMessage.substring(0, 5000);
-        }
-
-        return safeMessage;
+        return "Email delivery failed: " + failure.getClass().getSimpleName();
     }
 }
