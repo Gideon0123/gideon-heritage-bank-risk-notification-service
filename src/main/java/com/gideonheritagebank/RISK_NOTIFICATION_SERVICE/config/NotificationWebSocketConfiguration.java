@@ -1,4 +1,3 @@
-
 package com.gideonheritagebank.RISK_NOTIFICATION_SERVICE.config;
 
 import com.gideonheritagebank.RISK_NOTIFICATION_SERVICE.security.StompAuthenticationChannelInterceptor;
