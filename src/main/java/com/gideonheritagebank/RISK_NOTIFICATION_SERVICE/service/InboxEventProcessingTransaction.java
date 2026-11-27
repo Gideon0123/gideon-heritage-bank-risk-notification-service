@@ -12,6 +12,7 @@ import com.gideonheritagebank.RISK_NOTIFICATION_SERVICE.security.InboxPayloadEnc
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
@@ -28,6 +29,7 @@ public class InboxEventProcessingTransaction {
     private final InboxPayloadEncryptionService encryptionService;
     private final ObjectMapper objectMapper;
     private final IdentityEventNotificationFactory notificationFactory;
+    private final ApplicationEventPublisher eventPublisher;
 
     /*
      * This transaction includes:
@@ -101,10 +103,13 @@ public class InboxEventProcessingTransaction {
 
         if (!notificationAlreadyExists) {
 
-            notificationFactory.createNotification(
+            var notification = notificationFactory.createNotification(
                     inboxEvent,
                     payload
             );
+            if (notification != null) {
+                eventPublisher.publishEvent(new NotificationUnreadCountChangedEvent(notification.getUserId()));
+            }
         }
 
         /*

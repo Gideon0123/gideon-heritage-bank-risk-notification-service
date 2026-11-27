@@ -32,7 +32,7 @@ public class IdentityEventNotificationFactory {
     private final NotificationContentEncryptionService contentEncryptionService;
     private final NotificationOutboxService outboxService;
 
-    public void createNotification(
+    public Notification createNotification(
             InboxEvent inboxEvent,
             IdentityEventPayload payload
     ) {
@@ -55,7 +55,7 @@ public class IdentityEventNotificationFactory {
                     inboxEvent.getMessageId()
             );
 
-            return;
+            return null;
         }
 
         Notification notification = Notification.create(
@@ -80,7 +80,10 @@ public class IdentityEventNotificationFactory {
              * No preference record means the channel is enabled
              * by default.
              */
-            if (!isChannelEnabled(inboxEvent.getUserId(), definition.category(), channel)) {
+            NotificationPreference preference = preferenceRepository.findByUserIdAndCategoryAndChannel(
+                    inboxEvent.getUserId(), definition.category(), channel
+            ).orElse(null);
+            if (preference != null && !preference.isEnabled()) {
 
                 log.info(
                         "Notification channel skipped due to user preference. "
@@ -97,7 +100,8 @@ public class IdentityEventNotificationFactory {
                     notification,
                     inboxEvent,
                     definition,
-                    channel
+                    channel,
+                    preference == null ? null : preference.nextAllowedAt(Instant.now())
             );
         }
 
@@ -109,13 +113,15 @@ public class IdentityEventNotificationFactory {
          * the notification itself is still persisted.
          */
         outboxService.createNotificationWithDeliveries(notification);
+        return notification;
     }
 
     private void createDelivery(
             Notification notification,
             InboxEvent inboxEvent,
             NotificationDefinition definition,
-            NotificationChannel channel
+            NotificationChannel channel,
+            Instant deferUntil
     ) {
 
         RenderedNotificationTemplate rendered =
@@ -198,23 +204,10 @@ public class IdentityEventNotificationFactory {
                 DELIVERY_MAX_ATTEMPTS
         );
 
+        if (deferUntil != null) {
+            delivery.deferUntil(deferUntil);
+        }
         notification.addDelivery(delivery);
-    }
-
-    private boolean isChannelEnabled(
-            UUID userId,
-            NotificationCategory category,
-            NotificationChannel channel
-    ) {
-
-        return preferenceRepository
-                .findByUserIdAndCategoryAndChannel(
-                        userId,
-                        category,
-                        channel
-                )
-                .map(NotificationPreference::isEnabled)
-                .orElse(true);
     }
 
     /*

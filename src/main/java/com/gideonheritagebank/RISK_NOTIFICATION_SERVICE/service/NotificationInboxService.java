@@ -12,6 +12,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
@@ -22,7 +23,6 @@ import java.util.UUID;
 @Transactional(readOnly = true)
 public class NotificationInboxService {
 
-    private static final int DEFAULT_PAGE_SIZE = 20;
     private static final int MAX_PAGE_SIZE = 100;
 
     private static final java.util.Set<String> ALLOWED_SORT_FIELDS =
@@ -36,6 +36,7 @@ public class NotificationInboxService {
 
     private final NotificationRepository notificationRepository;
     private final CurrentUserService currentUserService;
+    private final ApplicationEventPublisher eventPublisher;
 
     /*
      * Retrieve the authenticated user's notification inbox.
@@ -72,6 +73,16 @@ public class NotificationInboxService {
         Page<NotificationResponse> responsePage = notifications.map(NotificationResponse::from);
 
         return PagedResponse.from(responsePage);
+    }
+
+
+    public PagedResponse<NotificationResponse> getHistory(int page, int size) {
+        CurrentUser currentUser = currentUserService.getCurrentUser();
+        validatePagination(page, size);
+        Pageable pageable = PageRequest.of(page - 1, size, Sort.by(Sort.Direction.DESC, "createdAt"));
+        return PagedResponse.from(notificationRepository
+                .findAllByUserIdOrderByCreatedAtDesc(currentUser.getId(), pageable)
+                .map(NotificationResponse::from));
     }
 
     /* Retrieve one notification belonging to the authenticated user. */
@@ -117,7 +128,18 @@ public class NotificationInboxService {
         );
 
         notification.markAsRead();
+        eventPublisher.publishEvent(new NotificationUnreadCountChangedEvent(currentUser.getId()));
 
+        return NotificationResponse.from(notification);
+    }
+
+
+    @Transactional
+    public NotificationResponse markAsUnread(UUID notificationId) {
+        CurrentUser currentUser = currentUserService.getCurrentUser();
+        Notification notification = findUserNotification(notificationId, currentUser.getId());
+        notification.markAsUnread();
+        eventPublisher.publishEvent(new NotificationUnreadCountChangedEvent(currentUser.getId()));
         return NotificationResponse.from(notification);
     }
 
@@ -132,10 +154,12 @@ public class NotificationInboxService {
 
         CurrentUser currentUser = currentUserService.getCurrentUser();
 
-        return notificationRepository.markAllUnreadAsRead(
+        int updated = notificationRepository.markAllUnreadAsRead(
                 currentUser.getId(),
                 Instant.now()
         );
+        if (updated > 0) eventPublisher.publishEvent(new NotificationUnreadCountChangedEvent(currentUser.getId()));
+        return updated;
     }
 
     /*
@@ -153,6 +177,7 @@ public class NotificationInboxService {
         );
 
         notification.archive();
+        eventPublisher.publishEvent(new NotificationUnreadCountChangedEvent(currentUser.getId()));
 
         return NotificationResponse.from(notification);
     }
@@ -169,6 +194,7 @@ public class NotificationInboxService {
         );
 
         notification.restore();
+        eventPublisher.publishEvent(new NotificationUnreadCountChangedEvent(currentUser.getId()));
 
         return NotificationResponse.from(notification);
     }
@@ -199,7 +225,7 @@ public class NotificationInboxService {
     private void validatePagination(int page, int size) {
 
         if (page < 1) {
-            page = 1; // Default to the first page if an invalid page number is provided.
+            throw new IllegalArgumentException("Page must be at least 1.");
         }
 
         if (size < 1 || size > MAX_PAGE_SIZE) {
