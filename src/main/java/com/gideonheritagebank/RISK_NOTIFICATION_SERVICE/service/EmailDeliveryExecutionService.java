@@ -90,18 +90,10 @@ public class EmailDeliveryExecutionService {
         } catch (MailException exception) {
 
             log.error(
-                    """
-                    SMTP DELIVERY FAILURE
-                    Delivery ID: {}
-                    Attempt: {}
-                    Exception Type: {}
-                    Exception Message: {}
-                    """,
+                    "SMTP delivery failed and will be retried. deliveryId={}, attempt={}, exceptionType={}",
                     claimed.deliveryId(),
                     claimed.attemptNumber(),
-                    exception.getClass().getName(),
-                    exception.getMessage(),
-                    exception
+                    exception.getClass().getSimpleName()
             );
 
             stateService.scheduleRetry(

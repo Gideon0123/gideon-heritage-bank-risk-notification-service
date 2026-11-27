@@ -7,12 +7,12 @@ import org.springframework.messaging.simp.stomp.StompCommand;
 import org.springframework.messaging.simp.stomp.StompHeaderAccessor;
 import org.springframework.messaging.support.ChannelInterceptor;
 import org.springframework.messaging.support.MessageHeaderAccessor;
-import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
+import java.security.Principal;
 import java.util.Set;
 import java.util.UUID;
 
@@ -101,10 +101,10 @@ public class StompAuthenticationChannelInterceptor
     private Authentication requireAuthenticatedJwt(
             StompHeaderAccessor accessor
     ) {
-        Authentication authentication = accessor.getUser();
+        Principal principal = accessor.getUser();
 
-        if (authentication == null || !authentication.isAuthenticated()
-                || !(authentication instanceof JwtAuthenticationToken jwtAuthentication)) {
+        if (!(principal instanceof JwtAuthenticationToken jwtAuthentication)
+                || !jwtAuthentication.isAuthenticated()) {
 
             throw new MessageDeliveryException(
                     "An authenticated JWT is required for this WebSocket operation."
@@ -120,7 +120,7 @@ public class StompAuthenticationChannelInterceptor
             );
         }
 
-        return authentication;
+        return jwtAuthentication;
     }
 
     private UUID extractUserId(Authentication authentication) {

@@ -214,11 +214,12 @@ public class EmailDeliveryStateService {
 
 
     private String resolveError(Throwable failure) {
-
         if (failure == null) {
             return "Unknown email delivery failure.";
         }
-
-        return "Email delivery failed: " + failure.getClass().getSimpleName();
+        if (failure instanceof org.springframework.mail.MailException) {
+            return "SMTP provider failure (" + failure.getClass().getSimpleName() + ").";
+        }
+        return "Email delivery failure (" + failure.getClass().getSimpleName() + ").";
     }
 }
