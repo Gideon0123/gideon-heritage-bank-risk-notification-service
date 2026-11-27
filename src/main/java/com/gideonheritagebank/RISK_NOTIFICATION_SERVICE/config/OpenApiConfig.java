@@ -14,9 +14,11 @@ import org.springframework.context.annotation.Configuration;
                 description = """
                         REST API documentation for the Gideon Heritage Bank RISK NOTIFICATION Service.
 
-                        This service manages risk notifications, alerts, and related operations.
-                        Authentication is performed using JWT access tokens.
-                        Protected endpoints require a valid Bearer token.
+                        This service manages durable notifications, delivery preferences and history,
+                        versioned notification templates, configurable risk assessments, and risk cases.
+                        Authentication is performed using Identity Service JWT access tokens.
+                        Protected endpoints require a valid Bearer token; administrative operations
+                        additionally require the ADMIN role and risk operations require ADMIN or RISK_ANALYST.
                         
                        
                         """

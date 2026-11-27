@@ -84,9 +84,7 @@ public class StompAuthenticationChannelInterceptor
     private void authorizeSubscription(
             StompHeaderAccessor accessor
     ) {
-
-        Authentication authentication =
-                requireAuthenticatedJwt(accessor);
+        Authentication authentication = requireAuthenticatedJwt(accessor);
 
         extractUserId(authentication);
 
@@ -103,11 +101,9 @@ public class StompAuthenticationChannelInterceptor
     private Authentication requireAuthenticatedJwt(
             StompHeaderAccessor accessor
     ) {
-
         Authentication authentication = accessor.getUser();
 
-        if (authentication == null
-                || !authentication.isAuthenticated()
+        if (authentication == null || !authentication.isAuthenticated()
                 || !(authentication instanceof JwtAuthenticationToken jwtAuthentication)) {
 
             throw new MessageDeliveryException(
@@ -129,16 +125,13 @@ public class StompAuthenticationChannelInterceptor
 
     private UUID extractUserId(Authentication authentication) {
 
-        JwtAuthenticationToken jwtAuthentication =
-                (JwtAuthenticationToken) authentication;
+        JwtAuthenticationToken jwtAuthentication = (JwtAuthenticationToken) authentication;
 
         String subject = jwtAuthentication.getToken().getSubject();
 
         if (subject == null || subject.isBlank()) {
 
-            throw new MessageDeliveryException(
-                    "The authenticated user identifier is missing."
-            );
+            throw new MessageDeliveryException("The authenticated user identifier is missing.");
         }
 
         try {
