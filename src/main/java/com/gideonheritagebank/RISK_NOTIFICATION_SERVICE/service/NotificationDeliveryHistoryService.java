@@ -18,17 +18,35 @@ import java.util.UUID;
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
 public class NotificationDeliveryHistoryService {
+
     private final NotificationDeliveryRepository repository;
     private final CurrentUserService currentUserService;
+
     public PagedResponse<NotificationDeliveryHistoryResponse> getMine(int page, int size) {
-        validate(page,size); CurrentUser user=currentUserService.getCurrentUser();
-        Page<NotificationDelivery> result=repository.findHistoryByUserId(user.getId(), PageRequest.of(page-1,size, Sort.by(Sort.Direction.DESC,"createdAt")));
+
+        validate(page,size); CurrentUser user = currentUserService.getCurrentUser();
+        Page<NotificationDelivery> result = repository.findHistoryByUserId(
+                user.getId(),
+                PageRequest.of(page -1 , size, Sort.by(Sort.Direction.DESC,"createdAt"))
+        );
+
         return PagedResponse.from(result.map(NotificationDeliveryHistoryResponse::from));
     }
+
     public NotificationDeliveryHistoryResponse getMine(UUID id) {
+
         CurrentUser user=currentUserService.getCurrentUser();
+
         return NotificationDeliveryHistoryResponse.from(repository.findOwnedDelivery(id,user.getId())
                 .orElseThrow(()->new ResourceNotFoundException("Notification delivery was not found.")));
     }
-    private void validate(int page,int size) { if(page<1) throw new IllegalArgumentException("Page must be at least 1."); if(size<1||size>100) throw new IllegalArgumentException("Page size must be between 1 and 100."); }
+
+
+    private void validate(int page,int size) {
+        if(page<1)
+            throw new IllegalArgumentException("Page must be at least 1.");
+
+        if(size<1||size>100)
+            throw new IllegalArgumentException("Page size must be between 1 and 100.");
+    }
 }
