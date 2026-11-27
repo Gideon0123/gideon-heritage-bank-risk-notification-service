@@ -317,6 +317,15 @@ public class NotificationDelivery {
         this.lockedUntil = leaseExpiry;
     }
 
+
+    public void deferUntil(Instant nextAttemptAt) {
+        if (status != NotificationDeliveryStatus.PENDING) {
+            throw new IllegalStateException("Only a pending delivery can be deferred before its first attempt.");
+        }
+        if (nextAttemptAt == null || !nextAttemptAt.isAfter(Instant.now())) return;
+        this.nextAttemptAt = nextAttemptAt;
+    }
+
     // SUCCESSFUL SMTP SUBMISSION
     public void markSent(
             String provider,

@@ -13,6 +13,7 @@ import org.hibernate.annotations.UuidGenerator;
 import java.time.Instant;
 import java.time.LocalTime;
 import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.util.UUID;
 
 @Getter
@@ -224,6 +225,22 @@ public class NotificationPreference {
             this.quietHoursStart = null;
             this.quietHoursEnd = null;
         }
+    }
+
+
+    public Instant nextAllowedAt(Instant now) {
+        if (!hasQuietHours() || now == null) return null;
+        ZoneId zone = ZoneId.of(timeZone);
+        ZonedDateTime localNow = now.atZone(zone);
+        LocalTime current = localNow.toLocalTime();
+        boolean crossesMidnight = quietHoursStart.isAfter(quietHoursEnd);
+        boolean active = crossesMidnight
+                ? !current.isBefore(quietHoursStart) || current.isBefore(quietHoursEnd)
+                : !current.isBefore(quietHoursStart) && current.isBefore(quietHoursEnd);
+        if (!active) return null;
+        java.time.LocalDate endDate = localNow.toLocalDate();
+        if (crossesMidnight && !current.isBefore(quietHoursStart)) endDate = endDate.plusDays(1);
+        return endDate.atTime(quietHoursEnd).atZone(zone).toInstant();
     }
 
     public boolean hasQuietHours() {

@@ -59,6 +59,21 @@ public class NotificationController {
         );
     }
 
+
+    @GetMapping("/history")
+    @Operation(summary = "Retrieve the authenticated user's complete notification history, including archived and expired records.")
+    public ResponseEntity<ApiResponse<PagedResponse<NotificationResponse>>> getHistory(
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "20") int size,
+            HttpServletRequest request
+    ) {
+        return ResponseEntity.ok(ApiResponse.success(
+                "Notification history retrieved successfully.", 200,
+                notificationInboxService.getHistory(page, size),
+                request.getRequestURI(), resolveTraceId(request)
+        ));
+    }
+
     /* GET ONE NOTIFICATION */
     @GetMapping("/{notificationId}")
     @Operation(summary = "Retrieve one notification belonging to the authenticated user.")
@@ -123,6 +138,20 @@ public class NotificationController {
                         resolveTraceId(request)
                 )
         );
+    }
+
+
+    @PatchMapping("/{notificationId}/unread")
+    @Operation(summary = "Mark one notification as unread.")
+    public ResponseEntity<ApiResponse<NotificationResponse>> markAsUnread(
+            @PathVariable UUID notificationId,
+            HttpServletRequest request
+    ) {
+        NotificationResponse response = notificationInboxService.markAsUnread(notificationId);
+        return ResponseEntity.ok(ApiResponse.success(
+                "Notification marked as unread.", 200, response,
+                request.getRequestURI(), resolveTraceId(request)
+        ));
     }
 
     /* MARK ALL NOTIFICATIONS AS READ */

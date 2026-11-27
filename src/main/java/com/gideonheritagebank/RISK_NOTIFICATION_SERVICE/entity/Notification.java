@@ -296,6 +296,10 @@ public class Notification {
         }
     }
 
+    public void markAsUnread() {
+        readAt = null;
+    }
+
     public void archive() {
 
         if (archivedAt == null) {
@@ -320,3 +324,4 @@ public class Notification {
         return expiresAt != null && expiresAt.isBefore(Instant.now());
     }
 }
+
