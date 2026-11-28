@@ -1,5 +1,7 @@
 package com.gideonheritagebank.RISK_NOTIFICATION_SERVICE.entity;
 
+import com.gideonheritagebank.RISK_NOTIFICATION_SERVICE.enums.RiskDecision;
+import com.gideonheritagebank.RISK_NOTIFICATION_SERVICE.enums.RiskLevel;
 import com.gideonheritagebank.RISK_NOTIFICATION_SERVICE.enums.RiskRuleOperator;
 import com.gideonheritagebank.RISK_NOTIFICATION_SERVICE.enums.RiskSignalType;
 import jakarta.persistence.*;

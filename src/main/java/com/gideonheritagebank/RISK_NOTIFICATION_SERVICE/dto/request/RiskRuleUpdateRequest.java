@@ -1,0 +1,28 @@
+package com.gideonheritagebank.RISK_NOTIFICATION_SERVICE.dto.request;
+
+import com.gideonheritagebank.RISK_NOTIFICATION_SERVICE.enums.*;
+import jakarta.validation.constraints.*;import java.math.BigDecimal;
+
+public record RiskRuleUpdateRequest(
+        @NotBlank
+        @Size(max=160)
+        String name,
+
+        @Size(max=1000)
+        String description,
+
+        @NotNull
+        RiskRuleOperator operator,
+
+        BigDecimal threshold,
+
+        @Min(1)
+        @Max(100)
+        int weight,
+
+        @NotNull
+        RiskLevel severity,
+
+        @NotNull
+        RiskDecision decision
+) {}
