@@ -1,0 +1,15 @@
+package com.gideonheritagebank.RISK_NOTIFICATION_SERVICE.enums;
+
+public enum RiskSignalType {
+
+    LOGIN_FAILURE,
+    NEW_DEVICE,
+    IP_REPUTATION,
+    TRANSACTION_AMOUNT,
+    TRANSACTION_VELOCITY,
+    GEOLOCATION_CHANGE,
+    NEW_BENEFICIARY,
+    ACCOUNT_PROFILE_CHANGE,
+    MANUAL_FLAG,
+    OTHER
+}
